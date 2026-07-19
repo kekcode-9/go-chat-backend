@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/kekcode-9/go-chat-backend/internal/models"
-	"github.com/kekcode-9/go-chat-backend/internal/repository"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/repository"
 	"github.com/kekcode-9/go-chat-backend/internal/websocket"
 
 	"github.com/google/uuid"

@@ -6,7 +6,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9" // alias the package by name: goredis
 
-	"github.com/kekcode-9/go-chat-backend/internal/config"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 )
 
 func NewClient(cfg *config.Config) *goredis.Client {

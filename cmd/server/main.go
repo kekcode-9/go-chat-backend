@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/kekcode-9/go-chat-backend/internal/config"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 	"github.com/kekcode-9/go-chat-backend/internal/message"
-	"github.com/kekcode-9/go-chat-backend/internal/redis"
-	"github.com/kekcode-9/go-chat-backend/internal/repository"
-	"github.com/kekcode-9/go-chat-backend/internal/server"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/redis"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/repository"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/server"
 	"github.com/kekcode-9/go-chat-backend/internal/websocket"
 )
 
