@@ -34,6 +34,30 @@ type WsClient struct {
 	Send chan []byte
 }
 
+func NewWsClient(
+	userID uuid.UUID,
+	deviceID uuid.UUID,
+	conn *websocket.Conn,
+	manager *WsConManager,
+	handler IncomingMessageHandler,
+) *WsClient {
+	return &WsClient{
+		UserID:         userID,
+		DeviceID:       deviceID,
+		Conn:           conn,
+		WsConManager:   manager,
+		MessageHandler: handler,
+		Send:           make(chan []byte, 256),
+	}
+}
+
+func (c *WsClient) Run() {
+	c.WsConManager.Register <- c
+
+	go c.WritePump()
+	go c.ReadPump()
+}
+
 func (c *WsClient) ReadPump() {
 	defer func() {
 		c.WsConManager.Unregister <- c

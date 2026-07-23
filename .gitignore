@@ -43,5 +43,7 @@ temp/
 # Generated files
 *.generated.go
 
+# others
 commands.txt
 docs/
+main1.go

@@ -1,47 +1,96 @@
 package server
 
 import (
+	"log"
 	"net/http"
 
-	"github.com/kekcode-9/go-chat-backend/internal/message"
+	"github.com/google/uuid"
+	ws "github.com/gorilla/websocket"
+
 	"github.com/kekcode-9/go-chat-backend/internal/websocket"
 )
 
-func NewRouter(
-	wsConManager *websocket.WsConManager,
-	messageService *message.MessageService,
-) http.Handler {
-	/*
-	creates an instance of a HTTP request router (officially called a 
-	"multiplexer" or "mux" in Go terminology)
-	It matches the URL path of incoming HTTP requests against a list of 
-	patterns you have registered, and redirects the request to the correct 
-	handler function.
-	*/
-	mux := http.NewServeMux()
+/*
+Upgrades HTTP connection to websocket.
+Creates the websocket client and runs the ReadPump and WritePump
+*/
 
-	registerWebsocketRoutes(
-		mux,
-		wsConManager,
-		messageService,
-	)
+var upgrader = ws.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
 
-	return mux
+	// For the PoC only
+	// Tighten this in production
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
 }
 
 func registerWebsocketRoutes(
 	mux *http.ServeMux,
 	wsConManager *websocket.WsConManager,
-	messageService *message.MessageService,
+	messageService IncomingMessageHandler,
 ) {
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		websocket.ServeWs(
+	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+		serveWs(
 			wsConManager,
 			messageService,
 			w,
 			r,
 		)
 	})
+}
+
+/*
+when ServeWs is called it is actually passed a *message.MessageService but the MessageService itself
+satisfies the IncomingMessageHandler interface because it implements the InMssgHandler method and therefor
+ServeWs function definition can receive messageService as a IncomingMessageHandler type
+*/
+func serveWs(
+	wsConManager *websocket.WsConManager,
+	messageService IncomingMessageHandler,
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	// -----------------------------------------
+	// Upgrade HTTP -> WebScoket
+	// -----------------------------------------
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("websocket upgrader:", err)
+		return
+	}
+
+	// -----------------------------------------
+	// For this iteration these come from query params
+	// Later they will come from authentication / sessions
+	// -----------------------------------------
+
+	userIDStr := r.URL.Query().Get("user_id")
+	deviceIDStr := r.URL.Query().Get("device_id")
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		conn.Close()
+		return
+	}
+
+	deviceID, err := uuid.Parse(deviceIDStr)
+	if err != nil {
+		conn.Close()
+		return
+	}
+
+	client := websocket.NewWsClient(
+		userID,
+		deviceID,
+		conn,
+		wsConManager,
+		messageService,
+	)
+
+	client.Run()
 }
 
 /*

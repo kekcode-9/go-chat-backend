@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 	"github.com/kekcode-9/go-chat-backend/internal/message"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/redis"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/repository"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/server"
@@ -80,15 +80,11 @@ func main() {
 	// Configure HTTP routes
 	// --------------------------------------------
 
-	router := server.NewRouter(
+	httpServer := server.CreateServer(
+		cfg,
 		wsConManager,
 		messageService,
 	)
-
-	httpServer := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: router,
-	}
 
 	go func() {
 		log.Printf("Backend %s listening on %s",
