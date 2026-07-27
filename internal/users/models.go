@@ -1,15 +1,11 @@
 package users
 
 import (
-	"time"
-
 	"github.com/google/uuid"
 )
 
-type User struct {
-	ID        uuid.UUID
-	UserName  string
-	Email     string
-	Password  string
-	CreatedAt time.Time
+type UserLookupResponse struct {
+	ID       uuid.UUID `json:"id"`
+	UserName string    `json:"user_name"`
+	Email    string    `json:"email"`
 }

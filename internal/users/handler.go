@@ -1,29 +1,80 @@
 package users
 
 import (
+	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
-
-	"github.com/kekcode-9/go-chat-backend/internal/auth"
 )
 
 func (u *UserService) RegisterRoutes(
 	mux *http.ServeMux,
 ) {
 
-	// for searching users to chat with
-	mux.Handle("GET /users/", auth.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		/*
-		* look for r.URL.Query.Get("email") or r.URL.Query.GET("username")
-		* search users table using email / username
-		* send back list of matching users
-		 */
-	})))
+	mux.HandleFunc("GET /users/", u.userLookupHandler)
 
-	mux.Handle("POST /users/block/", auth.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		/*
-		* Get user_id of the requesting user from jwt context
-		* find user_id of the to-be-blocked user in the request body
-		* Add new entry to blocked_users table
-		 */
-	})))
+	mux.HandleFunc("POST /users/block/", u.blockUserHandler)
+}
+
+// for searching users to chat with
+func (u *UserService) userLookupHandler(w http.ResponseWriter, r *http.Request) {
+	/*
+	* look for r.URL.Query.Get("email") or r.URL.Query.GET("username")
+	* search users table using email / username
+	* send back list of matching users
+	 */
+
+	email := r.URL.Query().Get("email")
+	userName := r.URL.Query().Get("username")
+
+	resp, err := u.LookupUser(
+		email,
+		userName,
+	)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrMissingQuery):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusBadRequest,
+			)
+
+		case errors.Is(err, ErrUserNotFound):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusNotFound,
+			)
+
+		default:
+			log.Printf("user lookup failed: %v", err)
+
+			http.Error(
+				w,
+				"internal server error",
+				http.StatusInternalServerError,
+			)
+		}
+
+		return
+	}
+
+	w.Header().Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("failed to encode user lookup response: %v", err)
+	}
+}
+
+func (u *UserService) blockUserHandler(w http.ResponseWriter, r *http.Request) {
+	/*
+	* Get user_id of the requesting user from jwt context
+	* find user_id of the to-be-blocked user in the request body
+	* Add new entry to blocked_users table
+	 */
 }

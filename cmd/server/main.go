@@ -77,7 +77,7 @@ func main() {
 
 	AuthService := auth.NewAuthService(pool, userService.Repo)
 
-	conversationService := conversations.NewConversationService()
+	conversationService := conversations.NewConversationService(pool)
 
 	// TODO: remove this
 	log.Println("========== TEST USERS ==========")

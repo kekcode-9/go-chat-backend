@@ -1,6 +1,9 @@
 package conversations
 
 import (
+	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 
 	"github.com/kekcode-9/go-chat-backend/internal/auth"
@@ -10,22 +13,22 @@ func (c *ConversationService) RegisterRoutes(
 	mux *http.ServeMux,
 ) {
 	// To fetch all conversations of the user
-	mux.Handle("GET /conversations", auth.AuthMiddleware(http.HandlerFunc(c.getConversationsHandler)))
+	mux.HandleFunc("GET /conversations", c.getConversationsHandler)
 
-	mux.Handle("POST /conversations", auth.AuthMiddleware(http.HandlerFunc(c.postConversationHandler)))
+	mux.HandleFunc("POST /conversations", c.postConversationHandler)
 
-	mux.Handle("POST /conversations/participant", auth.AuthMiddleware(http.HandlerFunc(c.postParticipantHandler)))
+	mux.HandleFunc("POST /conversations/participant", c.postParticipantHandler)
 
 	// To fetch all messages of a conversation
-	mux.Handle("GET /conversations/{id}/messages", auth.AuthMiddleware(http.HandlerFunc(c.getMessagesHandler)))
+	mux.HandleFunc("GET /conversations/{id}/messages", c.getMessagesHandler)
 
 	// request to remove one participant from a group type conversation
-	mux.Handle("DELETE /conversations/participant", auth.AuthMiddleware(http.HandlerFunc(c.removeGroupParticipantHandler)))
+	mux.HandleFunc("DELETE /conversations/participant", c.removeGroupParticipantHandler)
 
 	// request to delete entire conversation
-	mux.Handle("DELETE /conversations", auth.AuthMiddleware(http.HandlerFunc(c.deleteConversationHandler)))
+	mux.HandleFunc("DELETE /conversations", c.deleteConversationHandler)
 
-	mux.Handle("DELETE /conversations/leave", auth.AuthMiddleware(http.HandlerFunc(c.leaveConversationHandler)))
+	mux.HandleFunc("DELETE /conversations/leave", c.leaveConversationHandler)
 }
 
 // getConversationsHandler godoc
@@ -40,25 +43,133 @@ func (c *ConversationService) RegisterRoutes(
 // @Router /conversations [get]
 func (c *ConversationService) getConversationsHandler(w http.ResponseWriter, r *http.Request) {
 	/*
+	* To fetch all conversations of the user
 	* Get the user_id from the jwt context
-	* JOIN conversation_participants and conversations tables on
-	* conversations.id = conversation_participants.conversation_id
-	* WHERE user_id = conversation_participants.user_id
-	* Send back the list
+	* Find all conversations where this user is a participant
+	* Send back a list like:
+	* [{ conversation_id: uuid, participants: [ {participant_id: uuid, participant_name: string } ] }]
 	 */
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(
+			w,
+			"missing auth claims",
+			http.StatusUnauthorized,
+		)
+		return
+	}
+
+	req := GetConversationsRequest{
+		UserID: claims.UserID,
+	}
+
+	resp, err := c.getUserConversations(req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrFailedToFetchConversations):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusInternalServerError,
+			)
+		default:
+			http.Error(
+				w,
+				"internal server error",
+				http.StatusInternalServerError,
+			)
+		}
+		return
+	}
+
+	w.Header().Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf(
+			"failed to encode get conversations response: %v",
+			err,
+		)
+	}
 }
 
+// For starting direct conversation with another usre
+// this call will be made when one user clicks of the start conversation button beside another user's name
+// A conversation can be started first and after that first message is sent
 func (c *ConversationService) postConversationHandler(w http.ResponseWriter, r *http.Request) {
 	/*
 	* Get user_id of requesting user from jwt context
 	* Get user_id of the other user from request body
+	* Get conversation type from the request body which is optional. If not present the default type is "direct"
 	* create entry in conversations table and an entry in conversation_participants
 	* table for each of the users
 	* In conversation_participants the last_read_message_id would be initially Null
 	* and the last_read_message_seq will be initially 0
 	 */
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(
+			w,
+			"missing auth claims",
+			http.StatusUnauthorized,
+		)
+		return
+	}
+
+	var req CreateConversationRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(
+			w,
+			"invalid request body",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	req.RequestingUserID = claims.UserID
+
+	resp, err := c.createConversation(req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrCannotStartConversationWithSelf):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusBadRequest,
+			)
+
+		case errors.Is(err, ErrInvalidConversationType):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusBadRequest,
+			)
+
+		default:
+			log.Printf("create conversation failed: %v", err)
+
+			http.Error(
+				w,
+				"internal server error",
+				http.StatusInternalServerError,
+			)
+		}
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("failed to encode create conversation response: %v", err)
+	}
 }
 
+// adding a participant to a group
 func (c *ConversationService) postParticipantHandler(w http.ResponseWriter, r *http.Request) {
 	/*
 	* Get user_id of requesting user from jwt context
