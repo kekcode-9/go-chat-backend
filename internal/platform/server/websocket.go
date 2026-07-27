@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"log"
 	"net/http"
 
-	"github.com/google/uuid"
 	ws "github.com/gorilla/websocket"
+	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/kekcode-9/go-chat-backend/internal/auth"
 	"github.com/kekcode-9/go-chat-backend/internal/websocket"
 )
 
@@ -27,12 +29,16 @@ var upgrader = ws.Upgrader{
 }
 
 func registerWebsocketRoutes(
+	backendID string,
+	redisClient *goredis.Client,
 	mux *http.ServeMux,
 	wsConManager *websocket.WsConManager,
 	messageService IncomingMessageHandler,
 ) {
 	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(
+			backendID,
+			redisClient,
 			wsConManager,
 			messageService,
 			w,
@@ -47,38 +53,59 @@ satisfies the IncomingMessageHandler interface because it implements the InMssgH
 ServeWs function definition can receive messageService as a IncomingMessageHandler type
 */
 func serveWs(
+	backendID string,
+	redisClient *goredis.Client,
 	wsConManager *websocket.WsConManager,
 	messageService IncomingMessageHandler,
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	// -----------------------------------------
-	// Upgrade HTTP -> WebScoket
+	// Get authenticated user/device
+	// -----------------------------------------
+
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(
+			w,
+			"missing auth claims",
+			http.StatusUnauthorized,
+		)
+		return
+	}
+
+	userID := claims.UserID
+	deviceID := claims.DeviceID
+
+	// -----------------------------------------
+	// Register this device with the backend
+	// -----------------------------------------
+
+	err := redisClient.HSet(
+		context.Background(),
+		"DeviceConRegistry",
+		deviceID.String(),
+		backendID,
+	).Err()
+
+	if err != nil {
+		log.Printf("failed to register device in redis: %v", err)
+
+		http.Error(
+			w,
+			"internal server error",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	// -----------------------------------------
+	// Upgrade HTTP -> WebSocket
 	// -----------------------------------------
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("websocket upgrader:", err)
-		return
-	}
-
-	// -----------------------------------------
-	// For this iteration these come from query params
-	// Later they will come from authentication / sessions
-	// -----------------------------------------
-
-	userIDStr := r.URL.Query().Get("user_id")
-	deviceIDStr := r.URL.Query().Get("device_id")
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		conn.Close()
-		return
-	}
-
-	deviceID, err := uuid.Parse(deviceIDStr)
-	if err != nil {
-		conn.Close()
 		return
 	}
 

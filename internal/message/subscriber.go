@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/kekcode-9/go-chat-backend/internal/models"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 )
 
 func (m *MessageService) Subscriber(ctx context.Context) {
@@ -21,7 +21,7 @@ func (m *MessageService) Subscriber(ctx context.Context) {
 
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return
 
 		case redisMsg := <-ch:

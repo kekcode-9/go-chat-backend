@@ -8,10 +8,12 @@ import (
 	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 	"github.com/kekcode-9/go-chat-backend/internal/users"
 	"github.com/kekcode-9/go-chat-backend/internal/websocket"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 func CreateServer(
 	cfg *config.Config,
+	redisClient *goredis.Client,
 	wsConManager *websocket.WsConManager,
 	messageService IncomingMessageHandler,
 	userService *users.UserService,
@@ -21,6 +23,8 @@ func CreateServer(
 	router := http.NewServeMux()
 
 	registerRoutes(
+		cfg,
+		redisClient,
 		router,
 		wsConManager,
 		messageService,
@@ -39,6 +43,8 @@ func CreateServer(
 }
 
 func registerRoutes(
+	cfg *config.Config,
+	redisClient *goredis.Client,
 	router *http.ServeMux,
 	wsConManager *websocket.WsConManager,
 	messageService IncomingMessageHandler,
@@ -53,6 +59,8 @@ func registerRoutes(
 	conversationService.RegisterRoutes(router)
 
 	registerWebsocketRoutes(
+		cfg.BackendID,
+		redisClient,
 		router,
 		wsConManager,
 		messageService,

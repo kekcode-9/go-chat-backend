@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/kekcode-9/go-chat-backend/internal/models"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 )
 
 const (

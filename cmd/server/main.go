@@ -17,7 +17,6 @@ import (
 	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/db"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/redis"
-	"github.com/kekcode-9/go-chat-backend/internal/platform/repository"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/server"
 )
 
@@ -42,23 +41,6 @@ func main() {
 
 	defer pool.Close()
 
-	// TODO: remove this
-	repo := repository.NewMockRepository()
-
-	// TODO: remove later and have proper device registration mechanism
-	err = redisClient.HSet(
-		context.Background(),
-		"DeviceConRegistry",
-
-		repo.AliceAndroid.String(), "backend-1",
-		repo.BobMacbook.String(), "backend-1",
-		repo.BobIPhone.String(), "backend-1",
-	).Err()
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// -------------------------------------------------
 	// Wire in services with dependencies
 	// -------------------------------------------------
@@ -68,7 +50,7 @@ func main() {
 
 	messageService := message.NewMessageService(
 		cfg.BackendID,
-		repo,
+		pool,
 		redisClient,
 		wsConManager,
 	)
@@ -78,20 +60,6 @@ func main() {
 	AuthService := auth.NewAuthService(pool, userService.Repo)
 
 	conversationService := conversations.NewConversationService(pool)
-
-	// TODO: remove this
-	log.Println("========== TEST USERS ==========")
-
-	log.Println("Conversation :", repo.ConversationID)
-
-	log.Println("Alice User   :", repo.AliceUserID)
-	log.Println("Alice Device :", repo.AliceAndroid)
-
-	log.Println("Bob User     :", repo.BobUserID)
-	log.Println("Bob Macbook  :", repo.BobMacbook)
-	log.Println("Bob iPhone   :", repo.BobIPhone)
-
-	log.Println("===============================")
 
 	// --------------------------------------------
 	// Start long-running background workers
@@ -107,6 +75,7 @@ func main() {
 
 	httpServer := server.CreateServer(
 		cfg,
+		redisClient,
 		wsConManager,
 		messageService,
 		userService,

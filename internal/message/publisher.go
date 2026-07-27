@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/kekcode-9/go-chat-backend/internal/models"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 )
 
 func (m *MessageService) Publish(

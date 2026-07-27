@@ -4,18 +4,18 @@ import (
 	"context"
 	"time"
 
-	"github.com/kekcode-9/go-chat-backend/internal/models"
-	"github.com/kekcode-9/go-chat-backend/internal/platform/repository"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 	"github.com/kekcode-9/go-chat-backend/internal/websocket"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
 )
 
 type MessageService struct {
 	BackendID string
 
-	repo *repository.MockRepository
+	repo *Repository
 
 	redis *goredis.Client
 
@@ -24,10 +24,13 @@ type MessageService struct {
 
 func NewMessageService(
 	backendID string,
-	repo *repository.MockRepository,
+	db *pgxpool.Pool,
 	redisClient *goredis.Client,
 	wsConManager *websocket.WsConManager,
 ) *MessageService {
+	repo := &Repository{
+		db: db,
+	}
 	return &MessageService{
 		BackendID:    backendID,
 		repo:         repo,
@@ -51,59 +54,86 @@ func (m *MessageService) InMssgHandler(
 	senderDeviceID uuid.UUID,
 	conversationID uuid.UUID,
 ) error {
-	// ------------------------------------------------------------------
-	// Placeholder.
-	//
-	// Eventually this method will:
-	//
-	// 1. Allocate sequence number.
-	// 2. Insert message.
-	// 3. Find conversation participants.
-	// 4. Find participant devices.
-	// 5. Ask Redis which backend owns each device.
-	// 6. Group devices by backend.
-	// 7. Publish one ChatMessage per backend.
-	// ------------------------------------------------------------------
 
 	ctx := context.Background()
 
 	// ------------------------------------------------------------------
-	// Find conversation participants
+	// Persist the message inside a transaction.
 	// ------------------------------------------------------------------
 
-	userIDs, err := m.repo.FindConversationParticipants(conversationID)
+	tx, err := m.repo.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback(ctx)
+
+	sequenceNo, err := m.repo.AllocateSequenceNumber(
+		ctx,
+		tx,
+		conversationID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	createResp, err := m.repo.CreateMessage(
+		ctx,
+		tx,
+		CreateMessageReq{
+			ConversationID: conversationID,
+			SenderUserID:   senderUserID,
+			Content:        payload,
+		},
+		sequenceNo,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// ------------------------------------------------------------------
+	// Find conversation participants.
+	// ------------------------------------------------------------------
+
+	userIDs, err := m.repo.FindConversationParticipants(
+		ctx,
+		conversationID,
+	)
 
 	if err != nil {
 		return err
 	}
 
 	// ------------------------------------------------------------------
-	// Find all participant devices
+	// Find all active devices for those participants.
 	// ------------------------------------------------------------------
 
-	userDevices, err := m.repo.FindDevicesForUsers(userIDs)
+	userDevices, err := m.repo.FindDevicesForUsers(
+		ctx,
+		userIDs,
+	)
 
 	if err != nil {
 		return err
 	}
 
-	// --------------------------------------------------
-	// Add sender's other devices.
-	// (In this mock repository they are already present
-	// because the sender is a conversation participant.
-	// Keeping this comment because later the DB version
-	// will explicitly exclude senderDeviceID.)
-	// --------------------------------------------------
+	// ------------------------------------------------------------------
+	// Group target devices by backend.
+	// ------------------------------------------------------------------
 
-	// backendID -> []deviceID
-	// For grouping devices by the backends they are connected to
 	backendTargets := make(map[string][]uuid.UUID)
 
 	for _, devices := range userDevices {
 
 		for _, deviceID := range devices {
-			// Skip the device that originated the message.
-			// The frontend already rendered it.
+
+			// Don't echo back to the originating device.
 			if deviceID == senderDeviceID {
 				continue
 			}
@@ -115,6 +145,7 @@ func (m *MessageService) InMssgHandler(
 			).Result()
 
 			if err != nil {
+				// Device is currently offline.
 				continue
 			}
 
@@ -125,21 +156,23 @@ func (m *MessageService) InMssgHandler(
 		}
 	}
 
-	// --------------------------------------------------
-	// Publish one message per backend
-	// --------------------------------------------------
+	// ------------------------------------------------------------------
+	// Publish exactly one ChatMessage per backend.
+	// ------------------------------------------------------------------
 
 	for backendID, targetDevices := range backendTargets {
-		mssg := models.ChatMessage{
-			MessageID: uuid.New(),
 
-			ConversationID: conversationID,
+		chatMessage := models.ChatMessage{
+			MessageID: createResp.MessageID,
 
-			Sequence_no: 1, // mocked
+			ConversationID: createResp.ConversationID,
+
+			Sequence_no: createResp.SequenceNo,
 
 			SenderUserID: senderUserID,
 
-			SenderName: "Mock User",
+			// TODO: Replace with actual sender name lookup.
+			SenderName: "",
 
 			TargetDeviceIDs: targetDevices,
 
@@ -151,7 +184,7 @@ func (m *MessageService) InMssgHandler(
 		if err := m.publishToBackend(
 			ctx,
 			backendID,
-			mssg,
+			chatMessage,
 		); err != nil {
 			return err
 		}
