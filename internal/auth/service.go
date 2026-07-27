@@ -2,19 +2,17 @@ package auth
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
 )
 
-var jwtSecret = os.Getenv("JWT_SECRET")
+var jwtSecret []byte
 
-func Init() {
-	if jwtSecret == "" {
-		jwtSecret = "hello"
-	}
+func Init(cfg *config.Config) {
+	jwtSecret = cfg.JWTSecret
 }
 
 type AuthService struct {

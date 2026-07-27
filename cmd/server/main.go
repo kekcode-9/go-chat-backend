@@ -62,7 +62,7 @@ func main() {
 	// -------------------------------------------------
 	// Wire in services with dependencies
 	// -------------------------------------------------
-	auth.Init()
+	auth.Init(cfg)
 
 	wsConManager := websocket.NewWsConManager()
 

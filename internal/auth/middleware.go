@@ -27,6 +27,19 @@ func AuthMiddleware(
 		w http.ResponseWriter,
 		r *http.Request,
 	) {
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			switch r.URL.Path {
+			case "/auth/signup/",
+				"/auth/login/",
+				"/auth/refresh/":
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
 		authHeader := r.Header.Get("Authorization")
 
 		if authHeader == "" {

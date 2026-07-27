@@ -29,9 +29,12 @@ func CreateServer(
 		conversationService,
 	)
 
+	handler := auth.AuthMiddleware(router)
+	handler = CORSMiddleware(handler)
+
 	return &http.Server{
 		Addr:    cfg.HTTPAddr,
-		Handler: router,
+		Handler: handler,
 	}
 }
 
