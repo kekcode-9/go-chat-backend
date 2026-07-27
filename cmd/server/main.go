@@ -8,12 +8,17 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/kekcode-9/go-chat-backend/internal/auth"
+	"github.com/kekcode-9/go-chat-backend/internal/conversations"
 	"github.com/kekcode-9/go-chat-backend/internal/message"
+	"github.com/kekcode-9/go-chat-backend/internal/users"
+	"github.com/kekcode-9/go-chat-backend/internal/websocket"
+
 	"github.com/kekcode-9/go-chat-backend/internal/platform/config"
+	"github.com/kekcode-9/go-chat-backend/internal/platform/db"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/redis"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/repository"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/server"
-	"github.com/kekcode-9/go-chat-backend/internal/websocket"
 )
 
 func main() {
@@ -29,19 +34,19 @@ func main() {
 
 	redisClient := redis.NewClient(cfg)
 
+	pool, err := db.NewPool(context.Background(), cfg)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer pool.Close()
+
+	// TODO: remove this
 	repo := repository.NewMockRepository()
 
-	wsConManager := websocket.NewWsConManager()
-
-	messageService := message.NewMessageService(
-		cfg.BackendID,
-		repo,
-		redisClient,
-		wsConManager,
-	)
-
-	// remove later and have proper device registration mechanism
-	err := redisClient.HSet(
+	// TODO: remove later and have proper device registration mechanism
+	err = redisClient.HSet(
 		context.Background(),
 		"DeviceConRegistry",
 
@@ -54,7 +59,27 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// remove this
+	// -------------------------------------------------
+	// Wire in services with dependencies
+	// -------------------------------------------------
+	auth.Init()
+
+	wsConManager := websocket.NewWsConManager()
+
+	messageService := message.NewMessageService(
+		cfg.BackendID,
+		repo,
+		redisClient,
+		wsConManager,
+	)
+
+	userService := users.NewUserService(pool)
+
+	AuthService := auth.NewAuthService(pool, userService.Repo)
+
+	conversationService := conversations.NewConversationService()
+
+	// TODO: remove this
 	log.Println("========== TEST USERS ==========")
 
 	log.Println("Conversation :", repo.ConversationID)
@@ -74,7 +99,7 @@ func main() {
 
 	go wsConManager.Run()
 
-	go messageService.Subscriber(context.Background())
+	go messageService.Run(context.Background())
 
 	// --------------------------------------------
 	// Configure HTTP routes
@@ -84,6 +109,9 @@ func main() {
 		cfg,
 		wsConManager,
 		messageService,
+		userService,
+		AuthService,
+		conversationService,
 	)
 
 	go func() {

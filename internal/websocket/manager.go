@@ -5,7 +5,7 @@ import (
 	"log"
 
 	"github.com/google/uuid"
-	
+
 	"github.com/kekcode-9/go-chat-backend/internal/models"
 )
 
@@ -16,7 +16,7 @@ takes messages from RouteMessage channel and
 writes them to target clients' send channel
 */
 
-type WsConManager struct{
+type WsConManager struct {
 	// device_id -> websocket client
 	deviceWsCon map[uuid.UUID]*WsClient
 
@@ -45,7 +45,7 @@ func (m *WsConManager) Run() {
 		case client := <-m.Register:
 			m.deviceWsCon[client.DeviceID] = client
 
-			log.Printf("Registered device %s", client.DeviceID,)
+			log.Printf("Registered device %s", client.DeviceID)
 
 		case client := <-m.Unregister:
 			if _, ok := m.deviceWsCon[client.DeviceID]; ok {
@@ -56,7 +56,7 @@ func (m *WsConManager) Run() {
 
 				close(client.Send)
 
-				log.Printf("Unregistered device %s", client.DeviceID,)
+				log.Printf("Unregistered device %s", client.DeviceID)
 			}
 
 		case chatMessage := <-m.RouteMessage:

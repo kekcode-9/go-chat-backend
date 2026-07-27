@@ -54,13 +54,17 @@ CREATE INDEX idx_messages_sender ON messages (sender_id);
 -- =============================================================================
 -- Conversation Participants
 -- =============================================================================
+
 CREATE TABLE conversation_participants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'left', 'removed')),
     conversation_id UUID NOT NULL REFERENCES conversations(id),
     user_id UUID NOT NULL REFERENCES users(id),
     left_at TIMESTAMPTZ,
+    removed_at TIMESTAMPTZ,
+    removed_by UUID REFERENCES users(id),
     is_muted BOOLEAN NOT NULL DEFAULT FALSE,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
     is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
@@ -90,16 +94,17 @@ CREATE INDEX idx_devices_user ON devices (user_id);
 -- =============================================================================
 -- Refresh_sessions
 -- =============================================================================
-
 CREATE TABLE refresh_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     device_id UUID NOT NULL REFERENCES devices(id),
+    session_id UUID NOT NULL,
     refresh_token_hash TEXT NOT NULL,
-    expires_At TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
     revoked BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- =============================================================================
 -- Blocked Users

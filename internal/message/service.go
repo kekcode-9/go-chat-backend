@@ -12,7 +12,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-type MessageService struct{
+type MessageService struct {
 	BackendID string
 
 	repo *repository.MockRepository
@@ -29,11 +29,15 @@ func NewMessageService(
 	wsConManager *websocket.WsConManager,
 ) *MessageService {
 	return &MessageService{
-		BackendID: backendID,
-		repo: repo,
-		redis: redisClient,
+		BackendID:    backendID,
+		repo:         repo,
+		redis:        redisClient,
 		wsConManager: wsConManager,
 	}
+}
+
+func (m *MessageService) Run(ctx context.Context) {
+	m.Subscriber(ctx)
 }
 
 // ---------------------------------------------
@@ -126,7 +130,7 @@ func (m *MessageService) InMssgHandler(
 	// --------------------------------------------------
 
 	for backendID, targetDevices := range backendTargets {
-		mssg := models.ChatMessage {
+		mssg := models.ChatMessage{
 			MessageID: uuid.New(),
 
 			ConversationID: conversationID,
