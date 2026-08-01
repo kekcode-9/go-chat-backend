@@ -17,6 +17,7 @@ type IncomingMessageHandler interface {
 		senderUserID uuid.UUID,
 		senderDeviceID uuid.UUID,
 		conversationID uuid.UUID,
+		clientMssgID uuid.UUID,
 	) error
 
 	ReadReceiptHandler(

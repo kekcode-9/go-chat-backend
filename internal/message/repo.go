@@ -82,6 +82,7 @@ func (r *Repository) CreateMessage(
 			sequence_no
 		)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (sender_id, client_message_id) DO NOTHING
 		RETURNING
 			id,
 			conversation_id,
@@ -102,6 +103,9 @@ func (r *Repository) CreateMessage(
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("message exists")
+		}
 		return nil, err
 	}
 

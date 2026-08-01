@@ -19,6 +19,7 @@ type IncomingMessage struct {
 	Payload          string    `json:"payload"`
 	ReadMessageID    uuid.UUID `json:"read_message_id"`
 	ReadMessageSeqNo int64     `json:"read_message_seq_no"`
+	ClientMessageID  uuid.UUID `json:"client_message_id"` // For idempotency
 }
 
 // For later ---------------------------------------------------

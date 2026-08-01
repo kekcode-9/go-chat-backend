@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"time"
 
@@ -113,17 +114,67 @@ func (c *WsClient) ReadPump() {
 		}
 
 		if req.Type == "message" {
+			if req.Payload == "" {
+				log.Println("Invalid websocket payload: missing payload")
+				errMssg := ErrorMessage{
+					Type:    "error",
+					Code:    "missing_payload",
+					Message: "missing payload",
+				}
+				c.Send <- []byte(errMssg.Message)
+				continue
+			}
+
+			if req.ConversationID == uuid.Nil {
+				log.Println("Invalid websocket payload: missing conversation_id")
+				errMssg := ErrorMessage{
+					Type:    "error",
+					Code:    "missing_conversation_id",
+					Message: "missing conversation_id",
+				}
+				c.Send <- []byte(errMssg.Message)
+				continue
+			}
+
+			if req.ClientMessageID == uuid.Nil {
+				log.Println("Invalid websocket payload: missing client_message_id")
+				errMssg := ErrorMessage{
+					Type:    "error",
+					Code:    "missing_client_message_id",
+					Message: "missing client_message_id",
+				}
+				c.Send <- []byte(errMssg.Message)
+				continue
+			}
+
 			err = c.MessageHandler.InMssgHandler(
 				req.Payload,
 				time.Now(),
 				c.UserID,
 				c.DeviceID,
 				req.ConversationID,
+				req.ClientMessageID,
 			)
 
 			if err != nil {
+				if errors.Is(err, errors.New("message exists")) {
+					errMssg := ErrorMessage{
+						Type:    "error",
+						Code:    "message_exists",
+						Message: "message already exists",
+					}
+					c.Send <- []byte(errMssg.Message)
+					continue
+				}
 				log.Println("incoming message:", err)
 			}
+
+			ack := SendMessageAck{
+				Type:            "message_ack",
+				ClientMessageID: req.ClientMessageID,
+			}
+
+			c.Send <- []byte(ack.ClientMessageID.String())
 		}
 
 		if req.Type == "read_receipt" {

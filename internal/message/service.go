@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
@@ -94,6 +95,7 @@ func (m *MessageService) InMssgHandler(
 	senderUserID uuid.UUID,
 	senderDeviceID uuid.UUID,
 	conversationID uuid.UUID,
+	clientMssgID uuid.UUID,
 ) error {
 
 	ctx := context.Background()
@@ -123,14 +125,19 @@ func (m *MessageService) InMssgHandler(
 		ctx,
 		tx,
 		CreateMessageReq{
-			ConversationID: conversationID,
-			SenderUserID:   senderUserID,
-			Content:        payload,
+			ConversationID:  conversationID,
+			SenderUserID:    senderUserID,
+			Content:         payload,
+			ClientMessageID: &clientMssgID,
 		},
 		sequenceNo,
 	)
 
 	if err != nil {
+		if errors.Is(err, errors.New("message exists")) {
+			// Message already exists, so we can safely ignore this duplicate.
+			return err
+		}
 		return err
 	}
 
