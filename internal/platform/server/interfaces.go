@@ -18,4 +18,11 @@ type IncomingMessageHandler interface {
 		senderDeviceID uuid.UUID,
 		conversationID uuid.UUID,
 	) error
+
+	ReadReceiptHandler(
+		conversationID uuid.UUID,
+		sequenceNo int64,
+		mssgID uuid.UUID,
+		senderUserID uuid.UUID,
+	) error
 }

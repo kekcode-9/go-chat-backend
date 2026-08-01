@@ -14,8 +14,11 @@ import (
 // those are already known from the authenticated
 // websocket connection.
 type IncomingMessage struct {
-	ConversationID uuid.UUID `json:"conversation_id"`
-	Payload        string    `json:"payload"`
+	Type             string    `json:"type"` // "message" | "typing" | "read_receipt" | "edit_message" | "delete_message"
+	ConversationID   uuid.UUID `json:"conversation_id"`
+	Payload          string    `json:"payload"`
+	ReadMessageID    uuid.UUID `json:"read_message_id"`
+	ReadMessageSeqNo int64     `json:"read_message_seq_no"`
 }
 
 // For later ---------------------------------------------------

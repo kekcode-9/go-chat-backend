@@ -109,6 +109,60 @@ func (r *Repository) CreateMessage(
 }
 
 // -----------------------------------------------------------------------------
+// Update read receipt related detaila for the participant in the conversation.
+// -----------------------------------------------------------------------------
+
+func (r *Repository) CreateReadReceipt(
+	ctx context.Context,
+	tx pgx.Tx,
+	conversationID uuid.UUID,
+	userID uuid.UUID,
+	messageID uuid.UUID,
+	sequenceNo int64,
+) error {
+	// find the participant record for the user in the conversation
+	var participantID uuid.UUID
+
+	err := tx.QueryRow(
+		ctx,
+		`
+		SELECT id
+		FROM conversation_participants
+		WHERE
+			conversation_id = $1
+			AND user_id = $2
+		`,
+		conversationID,
+		userID,
+	).Scan(&participantID)
+
+	if err != nil {
+		return err
+	}
+
+	// update the participant record with the read receipt details
+
+	_, err = tx.Exec(
+		ctx,
+		`
+		UPDATE conversation_participants
+		SET last_read_message_id = $1,
+			last_read_mssg_seq = $2
+		WHERE id = $3
+		`,
+		messageID,
+		sequenceNo,
+		participantID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// -----------------------------------------------------------------------------
 // Returns all ACTIVE participants of a conversation.
 // -----------------------------------------------------------------------------
 

@@ -26,4 +26,8 @@ var (
 	ErrInvalidConversationType = errors.New(
 		"invalid conversation type",
 	)
+
+	ErrDirectConversationAlreadyExists = errors.New(
+		"direct conversation already exists between the two users",
+	)
 )

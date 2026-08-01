@@ -107,13 +107,33 @@ func (c *WsClient) ReadPump() {
 			continue
 		}
 
-		err = c.MessageHandler.InMssgHandler(
-			req.Payload,
-			time.Now(),
-			c.UserID,
-			c.DeviceID,
-			req.ConversationID,
-		)
+		if req.Type == "" {
+			log.Println("Invalid websocket payload: missing type")
+			continue
+		}
+
+		if req.Type == "message" {
+			err = c.MessageHandler.InMssgHandler(
+				req.Payload,
+				time.Now(),
+				c.UserID,
+				c.DeviceID,
+				req.ConversationID,
+			)
+
+			if err != nil {
+				log.Println("incoming message:", err)
+			}
+		}
+
+		if req.Type == "read_receipt" {
+			err = c.MessageHandler.ReadReceiptHandler(
+				req.ConversationID,
+				req.ReadMessageSeqNo,
+				req.ReadMessageID,
+				c.UserID,
+			)
+		}
 
 		if err != nil {
 			log.Println("incoming message:", err)

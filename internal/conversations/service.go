@@ -101,6 +101,23 @@ func (c *ConversationService) createConversation(
 		return nil, ErrInvalidConversationType
 	}
 
+	if conversationType == "direct" {
+		// Check if a direct conversation already exists between the two users.
+		existingConversationID, err := c.repo.FindDirectConversationBetweenUsers(
+			ctx,
+			req.RequestingUserID,
+			req.OtherUserID,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if existingConversationID != uuid.Nil {
+			return nil, ErrDirectConversationAlreadyExists
+		}
+	}
+
 	conversationID, err := c.repo.CreateNewConversation(
 		ctx,
 		tx,

@@ -170,3 +170,46 @@ func (r *Repository) CreateNewParticipant(
 
 	return nil
 }
+
+func (r *Repository) FindDirectConversationBetweenUsers(
+	ctx context.Context,
+	userID1 uuid.UUID,
+	userID2 uuid.UUID,
+) (uuid.UUID, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT c.id
+		FROM conversations c
+		JOIN conversation_participants cp1
+			ON cp1.conversation_id = c.id
+		JOIN conversation_participants cp2
+			ON cp2.conversation_id = c.id
+		WHERE
+			c.type = 'direct'
+			AND cp1.user_id = $1
+			AND cp1.status = 'active'
+			AND cp2.user_id = $2
+			AND cp2.status = 'active'
+		LIMIT 1;
+		`,
+		userID1,
+		userID2,
+	)
+
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	defer rows.Close()
+
+	if rows.Next() {
+		var conversationID uuid.UUID
+		if err := rows.Scan(&conversationID); err != nil {
+			return uuid.Nil, err
+		}
+		return conversationID, nil
+	}
+
+	return uuid.Nil, nil // No direct conversation found
+}

@@ -44,6 +44,47 @@ func (m *MessageService) Run(ctx context.Context) {
 }
 
 // ---------------------------------------------
+// Handle read receipts from receivers
+// ---------------------------------------------
+
+func (m *MessageService) ReadReceiptHandler(
+	conversationID uuid.UUID,
+	sequenceNo int64,
+	mssgID uuid.UUID,
+	senderUserID uuid.UUID,
+) error {
+	ctx := context.Background()
+
+	// ------------------------------------------------------------------
+	// Persist the read receipt inside a transaction.
+	// ------------------------------------------------------------------
+
+	tx, err := m.repo.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback(ctx)
+
+	if err := m.repo.CreateReadReceipt(
+		ctx,
+		tx,
+		conversationID,
+		senderUserID,
+		mssgID,
+		sequenceNo,
+	); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ---------------------------------------------
 // Handle incoming message from senders
 // ---------------------------------------------
 

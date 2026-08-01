@@ -148,6 +148,13 @@ func (c *ConversationService) postConversationHandler(w http.ResponseWriter, r *
 				http.StatusBadRequest,
 			)
 
+		case errors.Is(err, ErrDirectConversationAlreadyExists):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusConflict,
+			)
+
 		default:
 			log.Printf("create conversation failed: %v", err)
 
