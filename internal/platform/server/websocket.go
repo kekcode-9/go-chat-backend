@@ -52,6 +52,16 @@ when ServeWs is called it is actually passed a *message.MessageService but the M
 satisfies the IncomingMessageHandler interface because it implements the InMssgHandler method and therefor
 ServeWs function definition can receive messageService as a IncomingMessageHandler type
 */
+// serveWs godoc
+//
+// @Summary Open websocket connection
+// @Description Upgrades an authenticated HTTP request to a websocket connection for chat messages and read receipts.
+// @Tags websocket
+// @Security BearerAuth
+// @Success 101 "Switching Protocols"
+// @Failure 401 {string} string "missing auth claims"
+// @Failure 500 {string} string "internal server error"
+// @Router /ws/ [get]
 func serveWs(
 	backendID string,
 	redisClient *goredis.Client,

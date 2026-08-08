@@ -74,6 +74,19 @@ func clearRefreshCookie(w http.ResponseWriter) {
 	})
 }
 
+// signupHandler godoc
+//
+// @Summary Sign up a user
+// @Description Creates a new user account and returns an access token. The refresh token is set in an HttpOnly cookie.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body SignupRequest true "Signup request"
+// @Success 201 {object} map[string]string
+// @Failure 400 {string} string "invalid request body"
+// @Failure 409 {string} string "email already exists"
+// @Failure 500 {string} string "internal server error"
+// @Router /auth/signup/ [post]
 func (a *AuthService) signupHandler(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -126,14 +139,28 @@ func (a *AuthService) signupHandler(
 	)
 }
 
-/*
-If user is logging in for the first time from a device then they are expected to not send
-a device_id in request body. In such case server itself will create the device_id.
-*/
+// loginHandler godoc
+//
+// @Summary Log in a user
+// @Description Authenticates a user and returns an access token. The refresh token is set in an HttpOnly cookie.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body LoginRequest true "Login request"
+// @Success 200 {object} map[string]string
+// @Failure 400 {string} string "invalid request body"
+// @Failure 401 {string} string "invalid credentials or unknown device"
+// @Failure 404 {string} string "user not found"
+// @Failure 500 {string} string "internal server error"
+// @Router /auth/login/ [post]
 func (a *AuthService) loginHandler(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	/*
+		If user is logging in for the first time from a device then they are expected to not send
+		a device_id in request body. In such case server itself will create the device_id.
+	*/
 	var req LoginRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -194,6 +221,17 @@ func (a *AuthService) loginHandler(
 	)
 }
 
+// refreshHandler godoc
+//
+// @Summary Refresh access token
+// @Description Uses the refresh_token cookie to issue a new access token and rotate the refresh token cookie.
+// @Tags auth
+// @Produce json
+// @Param Cookie header string true "refresh_token cookie"
+// @Success 200 {object} map[string]string
+// @Failure 401 {string} string "missing, invalid, expired, or reused refresh token"
+// @Failure 500 {string} string "internal server error"
+// @Router /auth/refresh/ [post]
 func (a *AuthService) refreshHandler(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -259,6 +297,16 @@ func (a *AuthService) refreshHandler(
 	)
 }
 
+// logoutHandler godoc
+//
+// @Summary Log out current device
+// @Description Revokes the current device session and clears the refresh token cookie.
+// @Tags auth
+// @Security BearerAuth
+// @Success 204 "No Content"
+// @Failure 401 {string} string "missing auth claims"
+// @Failure 500 {string} string "action failed"
+// @Router /auth/logout/ [post]
 func (a *AuthService) logoutHandler(
 	w http.ResponseWriter,
 	r *http.Request,

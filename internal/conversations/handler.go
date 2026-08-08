@@ -33,13 +33,14 @@ func (c *ConversationService) RegisterRoutes(
 
 // getConversationsHandler godoc
 //
-// @Summary Get all conversations of a user
-// @Description Returns all conversations that the authenticated user participates in.
-// @Tags Conversations
-// @Accept json
+// @Summary List conversations
+// @Description Returns all conversations for the authenticated user.
+// @Tags conversations
 // @Produce json
-// @Success 200 {array} ConversationResponse
-// @Failure 401 {object} ErrorResponse
+// @Security BearerAuth
+// @Success 200 {object} GetConversationsResponse
+// @Failure 401 {string} string "missing auth claims"
+// @Failure 500 {string} string "internal server error"
 // @Router /conversations [get]
 func (c *ConversationService) getConversationsHandler(w http.ResponseWriter, r *http.Request) {
 	/*
@@ -95,9 +96,21 @@ func (c *ConversationService) getConversationsHandler(w http.ResponseWriter, r *
 	}
 }
 
-// For starting direct conversation with another usre
-// this call will be made when one user clicks of the start conversation button beside another user's name
-// A conversation can be started first and after that first message is sent
+// postConversationHandler godoc
+//
+// @Summary Create conversation
+// @Description Creates a direct or group conversation for the authenticated user.
+// @Tags conversations
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body CreateConversationRequest true "Create conversation request"
+// @Success 201 {object} CreateConversationResponse
+// @Failure 400 {string} string "invalid request body, invalid conversation type, or self-conversation"
+// @Failure 401 {string} string "missing auth claims"
+// @Failure 409 {string} string "direct conversation already exists"
+// @Failure 500 {string} string "internal server error"
+// @Router /conversations [post]
 func (c *ConversationService) postConversationHandler(w http.ResponseWriter, r *http.Request) {
 	/*
 	* Get user_id of requesting user from jwt context
@@ -176,9 +189,9 @@ func (c *ConversationService) postConversationHandler(w http.ResponseWriter, r *
 	}
 }
 
-// adding a participant to a group
 func (c *ConversationService) postParticipantHandler(w http.ResponseWriter, r *http.Request) {
 	/*
+	* Adding a oparticipant to a group
 	* Get user_id of requesting user from jwt context
 	* Get user_id of the other user from request body
 	* Get the conversation_id from the request body

@@ -20,3 +20,6 @@ reset:
 
 version:
 	goose -dir $(MIGRATIONS_DIR) postgres "$(DB_URL)" version
+
+swagger:
+	swag init -g cmd/server/main.go --parseInternal

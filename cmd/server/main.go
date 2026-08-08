@@ -18,8 +18,19 @@ import (
 	"github.com/kekcode-9/go-chat-backend/internal/platform/db"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/redis"
 	"github.com/kekcode-9/go-chat-backend/internal/platform/server"
+
+	_ "github.com/kekcode-9/go-chat-backend/docs"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
+// @title Go Chat Backend API
+// @version 1.0
+// @description API documentation for Go Chat Backend.
+// @BasePath /
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Enter your bearer token in the format: Bearer <token>
 func main() {
 	// --------------------------------------------
 	// Load configuration
@@ -82,6 +93,11 @@ func main() {
 		AuthService,
 		conversationService,
 	)
+
+	swaggerMux := http.NewServeMux()
+	swaggerMux.Handle("GET /swagger/", httpSwagger.WrapHandler)
+	swaggerMux.Handle("/", httpServer.Handler)
+	httpServer.Handler = swaggerMux
 
 	go func() {
 		log.Printf("Backend %s listening on %s",

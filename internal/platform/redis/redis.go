@@ -15,7 +15,7 @@ func NewClient(cfg *config.Config) *goredis.Client {
 	})
 
 	if err := client.Ping(context.Background()).Err(); err != nil {
-		log.Fatal("Unable to connect to Redis: %v", err)
+		log.Fatalf("Unable to connect to Redis: %v", err)
 	}
 
 	log.Printf("Connected to Redis at %s", cfg.RedisAddr)

@@ -16,7 +16,21 @@ func (u *UserService) RegisterRoutes(
 	mux.HandleFunc("POST /users/block/", u.blockUserHandler)
 }
 
-// for searching users to chat with
+// userLookupHandler godoc
+//
+// @Summary Search users
+// @Description Searches users by email or username.
+// @Tags users
+// @Produce json
+// @Security BearerAuth
+// @Param email query string false "Email search term"
+// @Param username query string false "Username search term"
+// @Success 200 {object} UserLookupResponse
+// @Failure 400 {string} string "missing query"
+// @Failure 401 {string} string "missing or invalid access token"
+// @Failure 404 {string} string "user not found"
+// @Failure 500 {string} string "internal server error"
+// @Router /users/ [get]
 func (u *UserService) userLookupHandler(w http.ResponseWriter, r *http.Request) {
 	/*
 	* look for r.URL.Query.Get("email") or r.URL.Query.GET("username")
