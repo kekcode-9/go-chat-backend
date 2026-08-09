@@ -235,6 +235,7 @@ func (a *AuthService) login(
 	return &LoginResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
+		DeviceID:     *deviceID,
 	}, nil
 }
 

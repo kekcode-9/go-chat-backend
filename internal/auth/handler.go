@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/mileusna/useragent"
 )
 
@@ -39,6 +40,7 @@ func writeAuthResponse(
 	status int,
 	accessToken string,
 	refreshToken string,
+	deviceID *uuid.UUID,
 ) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
@@ -52,6 +54,19 @@ func writeAuthResponse(
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+
+	if deviceID != nil {
+		if err := json.NewEncoder(w).Encode(struct {
+			AccessToken string    `json:"access_token"`
+			DeviceID    uuid.UUID `json:"device_id"`
+		}{
+			AccessToken: accessToken,
+			DeviceID:    *deviceID,
+		}); err != nil {
+			log.Printf("failed to encode auth response: %v", err)
+		}
+		return
+	}
 
 	if err := json.NewEncoder(w).Encode(struct {
 		AccessToken string `json:"access_token"`
@@ -136,13 +151,14 @@ func (a *AuthService) signupHandler(
 		http.StatusCreated,
 		resp.AccessToken,
 		resp.RefreshToken,
+		nil,
 	)
 }
 
 // loginHandler godoc
 //
 // @Summary Log in a user
-// @Description Authenticates a user and returns an access token. The refresh token is set in an HttpOnly cookie.
+// @Description Authenticates a user and returns an access token. The refresh token is set in an HttpOnly cookie. When logging in from a new device, the device_id should be omitted from the request body. The server will create a new device_id in such cases and retrun it to frontend. From subsequent logins from the same device, the device_id should be sent in the request body.
 // @Tags auth
 // @Accept json
 // @Produce json
@@ -218,6 +234,7 @@ func (a *AuthService) loginHandler(
 		http.StatusOK,
 		resp.AccessToken,
 		resp.RefreshToken,
+		&resp.DeviceID,
 	)
 }
 
@@ -294,6 +311,7 @@ func (a *AuthService) refreshHandler(
 		http.StatusOK,
 		resp.AccessToken,
 		resp.RefreshToken,
+		nil,
 	)
 }
 

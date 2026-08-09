@@ -43,6 +43,7 @@ type LoginRequest struct {
 type LoginResponse struct {
 	AccessToken  string
 	RefreshToken string
+	DeviceID     uuid.UUID
 }
 
 // ----------------------------------------
