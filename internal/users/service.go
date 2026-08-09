@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -62,4 +63,35 @@ func (u *UserService) LookupUser(
 	}
 
 	return resp, nil
+}
+
+func (u *UserService) BlockUser(
+	userID uuid.UUID,
+	blockedUserID uuid.UUID,
+) error {
+	ctx := context.Background()
+
+	tx, err := u.Repo.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback(ctx)
+
+	err = u.Repo.BlockUser(
+		ctx,
+		tx,
+		userID,
+		blockedUserID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }

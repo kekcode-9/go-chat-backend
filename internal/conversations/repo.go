@@ -213,3 +213,50 @@ func (r *Repository) FindDirectConversationBetweenUsers(
 
 	return uuid.Nil, nil // No direct conversation found
 }
+
+// -----------------------------------------------------------------------------
+// Returns all ACTIVE participants of a conversation.
+// -----------------------------------------------------------------------------
+
+func (r *Repository) FindConversationParticipants(
+	ctx context.Context,
+	conversationID uuid.UUID,
+) ([]uuid.UUID, error) {
+
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT user_id
+		FROM conversation_participants
+		WHERE
+			conversation_id = $1
+			AND status = 'active'
+		`,
+		conversationID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var userIDs []uuid.UUID
+
+	for rows.Next() {
+
+		var userID uuid.UUID
+
+		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+
+		userIDs = append(userIDs, userID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return userIDs, nil
+}

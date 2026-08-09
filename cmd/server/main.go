@@ -59,18 +59,20 @@ func main() {
 
 	wsConManager := websocket.NewWsConManager()
 
+	conversationService := conversations.NewConversationService(pool)
+
+	userService := users.NewUserService(pool)
+
 	messageService := message.NewMessageService(
 		cfg.BackendID,
 		pool,
 		redisClient,
 		wsConManager,
+		userService.Repo,
+		conversationService.Repo,
 	)
 
-	userService := users.NewUserService(pool)
-
 	AuthService := auth.NewAuthService(pool, userService.Repo)
-
-	conversationService := conversations.NewConversationService(pool)
 
 	// --------------------------------------------
 	// Start long-running background workers

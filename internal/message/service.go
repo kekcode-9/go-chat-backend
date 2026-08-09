@@ -18,6 +18,10 @@ type MessageService struct {
 
 	repo *Repository
 
+	userStore UserStore
+
+	conversationStore ConversationStore
+
 	redis *goredis.Client
 
 	wsConManager *websocket.WsConManager
@@ -28,15 +32,19 @@ func NewMessageService(
 	db *pgxpool.Pool,
 	redisClient *goredis.Client,
 	wsConManager *websocket.WsConManager,
+	userStore UserStore,
+	conversationStore ConversationStore,
 ) *MessageService {
 	repo := &Repository{
 		db: db,
 	}
 	return &MessageService{
-		BackendID:    backendID,
-		repo:         repo,
-		redis:        redisClient,
-		wsConManager: wsConManager,
+		BackendID:         backendID,
+		repo:              repo,
+		userStore:         userStore,
+		conversationStore: conversationStore,
+		redis:             redisClient,
+		wsConManager:      wsConManager,
 	}
 }
 
@@ -149,7 +157,7 @@ func (m *MessageService) InMssgHandler(
 	// Find conversation participants.
 	// ------------------------------------------------------------------
 
-	userIDs, err := m.repo.FindConversationParticipants(
+	userIDs, err := m.conversationStore.FindConversationParticipants(
 		ctx,
 		conversationID,
 	)
@@ -162,7 +170,7 @@ func (m *MessageService) InMssgHandler(
 	// Find all active devices for those participants.
 	// ------------------------------------------------------------------
 
-	userDevices, err := m.repo.FindDevicesForUsers(
+	userDevices, err := m.userStore.FindDevicesForUsers(
 		ctx,
 		userIDs,
 	)

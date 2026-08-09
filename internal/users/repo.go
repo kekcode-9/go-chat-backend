@@ -101,3 +101,113 @@ func (r *Repository) GetUserByEmail(
 
 	return &user, nil
 }
+
+func (r *Repository) BlockUser(
+	ctx context.Context,
+	tx pgx.Tx,
+	blockerID uuid.UUID,
+	blockedID uuid.UUID,
+) error {
+	var exists bool
+
+	err := tx.QueryRow(
+		ctx,
+		`
+		SELECT EXISTS (
+			SELECT 1
+			FROM users
+			WHERE id = $1
+		)
+		`,
+		blockedID,
+	).Scan(&exists)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return ErrUserNotFound
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`
+		INSERT INTO blocked_users (
+			blocker_id,
+			blocked_id
+		)
+		VALUES ($1, $2)
+		`,
+		blockerID,
+		blockedID,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// Returns all non-revoked devices grouped by user.
+//
+// userID -> []deviceID
+// -----------------------------------------------------------------------------
+
+func (r *Repository) FindDevicesForUsers(
+	ctx context.Context,
+	userIDs []uuid.UUID,
+) (map[uuid.UUID][]uuid.UUID, error) {
+
+	if len(userIDs) == 0 {
+		return map[uuid.UUID][]uuid.UUID{}, nil
+	}
+
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT
+			user_id,
+			id
+		FROM devices
+		WHERE
+			user_id = ANY($1)
+			AND revoked_at IS NULL
+		`,
+		userIDs,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	result := make(map[uuid.UUID][]uuid.UUID)
+
+	for rows.Next() {
+
+		var (
+			userID   uuid.UUID
+			deviceID uuid.UUID
+		)
+
+		if err := rows.Scan(
+			&userID,
+			&deviceID,
+		); err != nil {
+			return nil, err
+		}
+
+		result[userID] = append(
+			result[userID],
+			deviceID,
+		)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}

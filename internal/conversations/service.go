@@ -9,6 +9,7 @@ import (
 
 type ConversationService struct {
 	repo *Repository
+	Repo *Repository
 }
 
 func NewConversationService(
@@ -18,6 +19,7 @@ func NewConversationService(
 
 	return &ConversationService{
 		repo: repo,
+		Repo: repo,
 	}
 }
 

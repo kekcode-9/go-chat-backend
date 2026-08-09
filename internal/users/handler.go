@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+
+	"github.com/kekcode-9/go-chat-backend/internal/auth"
 )
 
 func (u *UserService) RegisterRoutes(
@@ -91,4 +93,50 @@ func (u *UserService) blockUserHandler(w http.ResponseWriter, r *http.Request) {
 	* find user_id of the to-be-blocked user in the request body
 	* Add new entry to blocked_users table
 	 */
+
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(
+			w,
+			"missing auth claims",
+			http.StatusUnauthorized,
+		)
+		return
+	}
+
+	var req UserBlockRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Print("Invalid request body")
+
+		http.Error(
+			w,
+			"invalid request body",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	if err := u.BlockUser(
+		claims.UserID,
+		req.BlockedUserID,
+	); err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotFound):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusInternalServerError,
+			)
+		default:
+			log.Printf("failed to block user: %v", err)
+
+			http.Error(
+				w,
+				"internal server error",
+				http.StatusInternalServerError,
+			)
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

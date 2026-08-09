@@ -44,6 +44,6 @@ temp/
 *.generated.go
 
 # others
-commands.txt
+commands.md
 docs/
 main1.go

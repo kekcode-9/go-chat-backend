@@ -39,6 +39,16 @@ type CreateConversationResponse struct {
 }
 
 // ---------------------------------------
+// GET all messages for a conversation
+// ---------------------------------------
+
+type GetConversationMessagesRequest struct {
+	ConversationID uuid.UUID
+}
+
+type GetConversationMessagesResponse struct{}
+
+// ---------------------------------------
 // Repository models
 // ---------------------------------------
 
