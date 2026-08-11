@@ -6,6 +6,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// ---------------------------------------
+// GET all messages for a conversation
+// ---------------------------------------
+type Message struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Sequence_no    int64     `json:"sequence_no"`
+
+	SenderUserID uuid.UUID `json:"sender_user_id"`
+	SenderName   string    `json:"sender_name"`
+
+	Payload string `json:"payload"`
+
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type GetConversationMessagesResponse struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Limit          uuid.UUID `json:"limit"`
+	Messages       []Message `json:"messages"`
+}
+
 // -----------------------------------------------------------------------------
 // Internal request to create a new message.
 // -----------------------------------------------------------------------------

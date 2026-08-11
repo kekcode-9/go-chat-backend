@@ -25,7 +25,7 @@ func (m *MessageService) Subscriber(ctx context.Context) {
 			return
 
 		case redisMsg := <-ch:
-			var chatMessage models.ChatMessage
+			var chatMessage models.OutgoingMessage
 
 			err := json.Unmarshal(
 				[]byte(redisMsg.Payload),

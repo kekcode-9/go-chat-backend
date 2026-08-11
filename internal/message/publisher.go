@@ -10,7 +10,7 @@ import (
 func (m *MessageService) Publish(
 	ctx context.Context,
 	channel string,
-	message models.ChatMessage,
+	message models.OutgoingMessage,
 ) error {
 	payload, err := json.Marshal(message)
 

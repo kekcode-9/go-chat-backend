@@ -19,9 +19,6 @@ func (c *ConversationService) RegisterRoutes(
 
 	mux.HandleFunc("POST /conversations/participant", c.postParticipantHandler)
 
-	// To fetch all messages of a conversation
-	mux.HandleFunc("GET /conversations/{id}/messages", c.getMessagesHandler)
-
 	// request to remove one participant from a group type conversation
 	mux.HandleFunc("DELETE /conversations/participant", c.removeGroupParticipantHandler)
 
@@ -191,20 +188,13 @@ func (c *ConversationService) postConversationHandler(w http.ResponseWriter, r *
 
 func (c *ConversationService) postParticipantHandler(w http.ResponseWriter, r *http.Request) {
 	/*
-	* Adding a oparticipant to a group
+	* Adding a participant to a group
 	* Get user_id of requesting user from jwt context
 	* Get user_id of the other user from request body
 	* Get the conversation_id from the request body
 	* Change the type of the conversation in conversations table to "group"
 	* Add new participant in conversation_participants table with last_read_message_id Null
 	* and last_read_mssg_seq 0
-	 */
-}
-
-func (c *ConversationService) getMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	/*
-	* if query params have a from_seq value then fetch from that message sequence
-	* else fetch all messages for the conversation
 	 */
 }
 

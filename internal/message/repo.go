@@ -165,3 +165,160 @@ func (r *Repository) CreateReadReceipt(
 
 	return nil
 }
+
+// ------------------------------------------------------------------------------
+// Get all messages for a conversation up to a limit
+// ------------------------------------------------------------------------------
+
+func (r *Repository) getLatestMessages(
+	ctx context.Context,
+	tx pgx.Tx,
+	conversationID uuid.UUID,
+	limit int,
+) ([]Message, error) {
+	rows, err := tx.Query(
+		ctx,
+		`
+			SELECT *
+			FROM (
+				SELECT
+					m.id,
+					m.conversation_id,
+					m.sequence_no,
+					m.sender_id,
+					m.content,
+					m.created_at,
+					u.user_name
+				FROM messages m
+				JOIN users u
+					ON m.sender_id = u.id
+				WHERE
+					m.conversation_id = $1
+				ORDER BY m.sequence_no DESC
+				LIMIT $2
+			) latest
+			ORDER BY latest.sequence_no ASC
+		`,
+		conversationID,
+		limit,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return scanMessages(rows)
+}
+
+func (r *Repository) getMessagesBefore(
+	ctx context.Context,
+	tx pgx.Tx,
+	conversationID uuid.UUID,
+	limit int,
+	seqNo int64,
+) ([]Message, error) {
+	rows, err := tx.Query(
+		ctx,
+		`
+			SELECT *
+			FROM (
+				SELECT
+					m.id,
+					m.conversation_id,
+					m.sequence_no,
+					m.sender_id,
+					m.content,
+					m.created_at,
+					u.user_name
+				FROM messages m
+				JOIN users u
+					ON m.sender_id = u.id
+				WHERE
+					m.conversation_id = $1
+					AND m.sequence_no < $2
+				ORDER BY m.sequence_no DESC
+				LIMIT $3
+			) latest
+			ORDER BY latest.sequence_no ASC
+		`,
+		conversationID,
+		seqNo,
+		limit,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return scanMessages(rows)
+}
+
+func (r *Repository) getMessagesAfter(
+	ctx context.Context,
+	tx pgx.Tx,
+	conversationID uuid.UUID,
+	limit int,
+	seqNo int64,
+) ([]Message, error) {
+	rows, err := tx.Query(
+		ctx,
+		`
+		SELECT
+				m.id,
+				m.conversation_id,
+				m.sequence_no,
+				m.sender_id,
+				m.content,
+				m.created_at,
+				u.user_name
+			FROM messages m
+			JOIN users u
+				ON m.sender_id = u.id
+			WHERE
+				m.conversation_id = $1
+				AND m.sequence_no > $2
+			ORDER BY m.sequence_no ASC
+			LIMIT $3
+		`,
+		conversationID,
+		seqNo,
+		limit,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return scanMessages(rows)
+}
+
+func scanMessages(rows pgx.Rows) ([]Message, error) {
+	defer rows.Close()
+
+	var messages []Message
+
+	for rows.Next() {
+		var message Message
+
+		err := rows.Scan(
+			&message.MessageID,
+			&message.ConversationID,
+			&message.Sequence_no,
+			&message.SenderUserID,
+			&message.Payload,
+			&message.Timestamp,
+			&message.SenderName,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		messages = append(messages, message)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}

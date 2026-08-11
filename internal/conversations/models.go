@@ -1,6 +1,8 @@
 package conversations
 
-import "github.com/google/uuid"
+import (
+	"github.com/google/uuid"
+)
 
 // ---------------------------------------
 // Get Conversations
@@ -37,16 +39,6 @@ type CreateConversationRequest struct {
 type CreateConversationResponse struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
-
-// ---------------------------------------
-// GET all messages for a conversation
-// ---------------------------------------
-
-type GetConversationMessagesRequest struct {
-	ConversationID uuid.UUID
-}
-
-type GetConversationMessagesResponse struct{}
 
 // ---------------------------------------
 // Repository models

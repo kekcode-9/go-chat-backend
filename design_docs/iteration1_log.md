@@ -13,7 +13,7 @@ After [[Message flow with Redis]] and [[The actual database design]]
 
 # First:
 ## Create models (structs) for communication among structs and all:
-- A model called `ChatMessage` is mandatory which will have the following:
+- A model called `OutgoingMessage` is mandatory which will have the following:
 	- `message_id`
 	- `conversation_id`
 	- `sequence_no`
@@ -30,7 +30,7 @@ After [[Message flow with Redis]] and [[The actual database design]]
 ## Build the `WsConManager`
 - It will have a `deviceWsCon` registry which is a map from device id to `WsClient` instance
 - It will handle the registering, `unregistering` of clients taking register and `unregister` requests from two channels `Register` and `Unregister`
-- It will have a `RouteMessage` channel where messages are queued with each message having all the relevant sender, receiver and message info and the target device's id. It will read messages from `RouteMessage` and write it to the target device's client's send channel. `RouteMessage` is a channel for `ChatMessage` objects.
+- It will have a `RouteMessage` channel where messages are queued with each message having all the relevant sender, receiver and message info and the target device's id. It will read messages from `RouteMessage` and write it to the target device's client's send channel. `RouteMessage` is a channel for `OutgoingMessage` objects.
 
 ## Build the `MessageService`
 - It is a struct exposing an `InMssgHandler` and `OutMssgHandler` method

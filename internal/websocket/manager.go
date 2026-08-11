@@ -3,6 +3,7 @@ package websocket
 import (
 	"encoding/json"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -24,7 +25,7 @@ type WsConManager struct {
 
 	Unregister chan *WsClient
 
-	RouteMessage chan models.ChatMessage
+	RouteMessage chan models.OutgoingMessage
 }
 
 func NewWsConManager() *WsConManager {
@@ -35,7 +36,7 @@ func NewWsConManager() *WsConManager {
 
 		Unregister: make(chan *WsClient),
 
-		RouteMessage: make(chan models.ChatMessage),
+		RouteMessage: make(chan models.OutgoingMessage),
 	}
 }
 
@@ -67,7 +68,23 @@ func (m *WsConManager) Run() {
 					continue
 				}
 
-				payload, err := json.Marshal(chatMessage)
+				payload, err := json.Marshal(struct {
+					MessageID      uuid.UUID `json:"message_id"`
+					ConversationID uuid.UUID `json:"conversation_id"`
+					SequenceNo     int64     `json:"sequence_no"`
+					SenderUserID   uuid.UUID `json:"sender_user_id"`
+					SenderName     string    `json:"sender_name"`
+					Payload        string    `json:"payload"`
+					Timestamp      time.Time `json:"timestamp"`
+				}{
+					MessageID:      chatMessage.MessageID,
+					ConversationID: chatMessage.ConversationID,
+					SequenceNo:     chatMessage.Sequence_no,
+					SenderUserID:   chatMessage.SenderUserID,
+					SenderName:     chatMessage.SenderName,
+					Payload:        chatMessage.Payload,
+					Timestamp:      chatMessage.Timestamp,
+				})
 
 				if err != nil {
 					log.Println("marshal error:", err)

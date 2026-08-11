@@ -58,6 +58,12 @@ func registerRoutes(
 
 	conversationService.RegisterRoutes(router)
 
+	if messageRoutes, ok := messageService.(interface {
+		RegisterRoutes(*http.ServeMux)
+	}); ok {
+		messageRoutes.RegisterRoutes(router)
+	}
+
 	registerWebsocketRoutes(
 		cfg.BackendID,
 		redisClient,

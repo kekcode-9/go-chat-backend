@@ -213,12 +213,12 @@ func (m *MessageService) InMssgHandler(
 	}
 
 	// ------------------------------------------------------------------
-	// Publish exactly one ChatMessage per backend.
+	// Publish exactly one OutgoingMessage per backend.
 	// ------------------------------------------------------------------
 
 	for backendID, targetDevices := range backendTargets {
 
-		chatMessage := models.ChatMessage{
+		chatMessage := models.OutgoingMessage{
 			MessageID: createResp.MessageID,
 
 			ConversationID: createResp.ConversationID,
@@ -254,7 +254,7 @@ func (m *MessageService) InMssgHandler(
 // --------------------------------------------
 
 func (m *MessageService) OutMssgHandler(
-	message models.ChatMessage,
+	message models.OutgoingMessage,
 ) {
 	m.wsConManager.RouteMessage <- message
 }
@@ -262,7 +262,7 @@ func (m *MessageService) OutMssgHandler(
 func (m *MessageService) publishToBackend(
 	ctx context.Context,
 	backendID string,
-	message models.ChatMessage,
+	message models.OutgoingMessage,
 ) error {
 
 	return m.Publish(
@@ -270,4 +270,65 @@ func (m *MessageService) publishToBackend(
 		"backend:"+backendID,
 		message,
 	)
+}
+
+// ---------------------------------------------
+// Other logics
+// ---------------------------------------------
+func (m *MessageService) getMessages(
+	conversationID uuid.UUID,
+	limit int,
+	seqNo *int64,
+	getAfter bool,
+) ([]Message, error) {
+	/*
+	* if seqNo doesnt exist, call m.repo.getLatestMessages
+	* if seqNo exists and getAfter true call m.repo.getMessagesAfter
+	* if seqNo exists and getAfter false call m.repo.getMessagesBefore
+	 */
+	ctx := context.Background()
+
+	tx, err := m.repo.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer tx.Rollback(ctx)
+
+	var messages []Message
+
+	if seqNo == nil {
+		messages, err = m.repo.getLatestMessages(
+			ctx,
+			tx,
+			conversationID,
+			limit,
+		)
+	} else if getAfter {
+		messages, err = m.repo.getMessagesAfter(
+			ctx,
+			tx,
+			conversationID,
+			limit,
+			*seqNo,
+		)
+	} else {
+		messages, err = m.repo.getMessagesBefore(
+			ctx,
+			tx,
+			conversationID,
+			limit,
+			*seqNo,
+		)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
 }
