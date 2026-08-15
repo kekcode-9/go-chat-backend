@@ -3,6 +3,8 @@ package conversations
 import (
 	"context"
 
+	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -221,16 +223,20 @@ func (r *Repository) FindDirectConversationBetweenUsers(
 func (r *Repository) FindConversationParticipants(
 	ctx context.Context,
 	conversationID uuid.UUID,
-) ([]uuid.UUID, error) {
+) ([]models.ConversationParticipant, error) {
 
 	rows, err := r.db.Query(
 		ctx,
 		`
-		SELECT user_id
-		FROM conversation_participants
+		SELECT
+			cp.user_id,
+			u.user_name
+		FROM conversation_participants cp
+		JOIN users u
+			ON u.id = cp.user_id
 		WHERE
-			conversation_id = $1
-			AND status = 'active'
+			cp.conversation_id = $1
+			AND cp.status = 'active'
 		`,
 		conversationID,
 	)
@@ -241,22 +247,25 @@ func (r *Repository) FindConversationParticipants(
 
 	defer rows.Close()
 
-	var userIDs []uuid.UUID
+	var participants []models.ConversationParticipant
 
 	for rows.Next() {
 
-		var userID uuid.UUID
+		var participant models.ConversationParticipant
 
-		if err := rows.Scan(&userID); err != nil {
+		if err := rows.Scan(
+			&participant.UserID,
+			&participant.UserName,
+		); err != nil {
 			return nil, err
 		}
 
-		userIDs = append(userIDs, userID)
+		participants = append(participants, participant)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return userIDs, nil
+	return participants, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	ws "github.com/gorilla/websocket"
 	goredis "github.com/redis/go-redis/v9"
@@ -88,28 +89,6 @@ func serveWs(
 	deviceID := claims.DeviceID
 
 	// -----------------------------------------
-	// Register this device with the backend
-	// -----------------------------------------
-
-	err := redisClient.HSet(
-		context.Background(),
-		"DeviceConRegistry",
-		deviceID.String(),
-		backendID,
-	).Err()
-
-	if err != nil {
-		log.Printf("failed to register device in redis: %v", err)
-
-		http.Error(
-			w,
-			"internal server error",
-			http.StatusInternalServerError,
-		)
-		return
-	}
-
-	// -----------------------------------------
 	// Upgrade HTTP -> WebSocket
 	// -----------------------------------------
 
@@ -128,23 +107,30 @@ func serveWs(
 	)
 
 	client.Run()
+
+	// -----------------------------------------
+	// Register this device with the backend
+	// -----------------------------------------
+
+	err = redisClient.HSet(
+		context.Background(),
+		"DeviceConRegistry",
+		deviceID.String(),
+		backendID,
+	).Err()
+
+	if err != nil {
+		log.Printf("failed to register device in redis: %v", err)
+
+		client.WsConManager.Unregister <- client
+
+		conn.WriteControl(
+			ws.CloseMessage,
+			ws.FormatCloseMessage(ws.CloseInternalServerErr, "backend registration failed"),
+			time.Now().Add(time.Second),
+		)
+
+		conn.Close()
+		return
+	}
 }
-
-/*
-func main() {
-	// 1. Create a new, isolated request router
-	mux := http.NewServeMux()
-
-	// 2. Register patterns and their handler functions
-	mux.HandleFunc("/home", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "Welcome to the home page!")
-	})
-
-	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.9Request) {
-		fmt.Fprint(w, "User list API endpoint")
-	})
-
-	// 3. Pass your custom mux to the server
-	http.ListenAndServe(":8080", mux)
-}
-*/

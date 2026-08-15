@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/kekcode-9/go-chat-backend/internal/auth"
+
 	"github.com/google/uuid"
 )
 
@@ -14,6 +16,9 @@ func (m *MessageService) RegisterRoutes(
 ) {
 	// To fetch all messages of a conversation
 	mux.HandleFunc("GET /conversations/{id}/messages", m.getMessagesHandler)
+
+	// handle read receipt submission over api call (for non-live messages)
+	mux.HandleFunc("POST /conversations/{id}/messages/read-receipt", m.postReadReceiptHandler)
 }
 
 // getMessagesHandler godoc
@@ -161,4 +166,82 @@ func (m *MessageService) getMessagesHandler(w http.ResponseWriter, r *http.Reque
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("failed to encode get messages response: %v", err)
 	}
+}
+
+func (m *MessageService) postReadReceiptHandler(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(
+			w,
+			"missing auth claims",
+			http.StatusUnauthorized,
+		)
+		return
+	}
+
+	conversationIDParam := r.PathValue("id")
+	if conversationIDParam == "" {
+		http.Error(
+			w,
+			"id path parameter is required",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	conversationID, err := uuid.Parse(conversationIDParam)
+	if err != nil {
+		http.Error(
+			w,
+			"invalid conversation_id",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	var req PostReadReceiptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(
+			w,
+			"invalid request body",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	if req.MessageID == uuid.Nil {
+		http.Error(
+			w,
+			"message_id is required",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	if req.SequenceNo <= 0 {
+		http.Error(
+			w,
+			"sequence_no must be positive",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	if err := m.postReadReceipt(
+		conversationID,
+		claims.UserID,
+		req.MessageID,
+		req.SequenceNo,
+	); err != nil {
+		log.Printf("post read receipt failed: %v", err)
+
+		http.Error(
+			w,
+			"internal server error",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

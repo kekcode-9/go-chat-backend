@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+
+	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 )
 
 type UserStore interface {
@@ -17,5 +19,5 @@ type ConversationStore interface {
 	FindConversationParticipants(
 		ctx context.Context,
 		conversationID uuid.UUID,
-	) ([]uuid.UUID, error)
+	) ([]models.ConversationParticipant, error)
 }

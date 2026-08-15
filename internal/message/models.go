@@ -28,6 +28,11 @@ type GetConversationMessagesResponse struct {
 	Messages       []Message `json:"messages"`
 }
 
+type PostReadReceiptRequest struct {
+	MessageID  uuid.UUID `json:"message_id"`
+	SequenceNo int64     `json:"sequence_no"`
+}
+
 // -----------------------------------------------------------------------------
 // Internal request to create a new message.
 // -----------------------------------------------------------------------------

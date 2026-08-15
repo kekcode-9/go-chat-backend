@@ -17,6 +17,11 @@ type User struct {
 	CreatedAt time.Time
 }
 
+type ConversationParticipant struct {
+	UserID   uuid.UUID `json:"user_id"`
+	UserName string    `json:"user_name"`
+}
+
 // -----------------------------------------------------------------
 // DTO's (Data Transfer Objects) for the websocket protocol
 // -----------------------------------------------------------------

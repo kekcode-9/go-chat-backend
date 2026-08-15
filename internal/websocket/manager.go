@@ -1,11 +1,13 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"time"
 
 	"github.com/google/uuid"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 )
@@ -21,6 +23,8 @@ type WsConManager struct {
 	// device_id -> websocket client
 	deviceWsCon map[uuid.UUID]*WsClient
 
+	redisClient *goredis.Client
+
 	Register chan *WsClient
 
 	Unregister chan *WsClient
@@ -28,9 +32,11 @@ type WsConManager struct {
 	RouteMessage chan models.OutgoingMessage
 }
 
-func NewWsConManager() *WsConManager {
+func NewWsConManager(redisClient *goredis.Client) *WsConManager {
 	return &WsConManager{
 		deviceWsCon: make(map[uuid.UUID]*WsClient),
+
+		redisClient: redisClient,
 
 		Register: make(chan *WsClient),
 
@@ -44,21 +50,42 @@ func (m *WsConManager) Run() {
 	for {
 		select {
 		case client := <-m.Register:
+			// close existing connection from same client
+			if oldClient, ok := m.deviceWsCon[client.DeviceID]; ok {
+				oldClient.Close()
+
+				log.Printf("Replaced existing websocket for device %s", client.DeviceID)
+			}
+
 			m.deviceWsCon[client.DeviceID] = client
 
 			log.Printf("Registered device %s", client.DeviceID)
 
 		case client := <-m.Unregister:
-			if _, ok := m.deviceWsCon[client.DeviceID]; ok {
-				delete(
-					m.deviceWsCon,
-					client.DeviceID,
-				)
+			currentClient, ok := m.deviceWsCon[client.DeviceID]
 
-				close(client.Send)
-
-				log.Printf("Unregistered device %s", client.DeviceID)
+			if !ok {
+				log.Printf("Skipping unregister for unknown device %s", client.DeviceID)
+				continue
 			}
+
+			if currentClient != client {
+				log.Printf("Skipping stale unregister for device %s - probably old connection", client.DeviceID)
+				continue
+			}
+
+			delete(m.deviceWsCon, client.DeviceID)
+			client.Close()
+
+			if err := m.redisClient.HDel(
+				context.Background(),
+				"DeviceConRegistry",
+				client.DeviceID.String(),
+			).Err(); err != nil {
+				log.Printf("failed to remove device registry for device %s: %v", client.DeviceID, err)
+			}
+
+			log.Printf("Unregistered device %s", client.DeviceID)
 
 		case chatMessage := <-m.RouteMessage:
 			for _, deviceID := range chatMessage.TargetDeviceIDs {
@@ -95,7 +122,20 @@ func (m *WsConManager) Run() {
 				case client.Send <- payload:
 
 				default:
-					log.Printf("send buffer full for device %s", deviceID)
+					log.Printf("send buffer full for device %s; closing slow client", deviceID)
+
+					delete(m.deviceWsCon, client.DeviceID)
+					client.Close()
+
+					if err := m.redisClient.HDel(
+						context.Background(),
+						"DeviceConRegistry",
+						client.DeviceID.String(),
+					).Err(); err != nil {
+						log.Printf("failed to remove device registry for device %s: %v", client.DeviceID, err)
+					}
+
+					log.Printf("Unregistered device %s", client.DeviceID)
 				}
 			}
 		}

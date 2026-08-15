@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,6 +34,8 @@ type WsClient struct {
 	MessageHandler IncomingMessageHandler
 
 	Send chan []byte
+
+	closeOnce sync.Once
 }
 
 func NewWsClient(
@@ -57,6 +60,12 @@ func (c *WsClient) Run() {
 
 	go c.WritePump()
 	go c.ReadPump()
+}
+
+func (c *WsClient) Close() {
+	c.closeOnce.Do(func() {
+		c.Conn.Close()
+	})
 }
 
 func (c *WsClient) ReadPump() {
@@ -121,7 +130,11 @@ func (c *WsClient) ReadPump() {
 					Code:    "missing_payload",
 					Message: "missing payload",
 				}
-				c.Send <- []byte(errMssg.Message)
+				select {
+				case c.Send <- []byte(errMssg.Message):
+				default:
+					log.Printf("send buffer full for device %s; dropping error message", c.DeviceID)
+				}
 				continue
 			}
 
@@ -132,7 +145,11 @@ func (c *WsClient) ReadPump() {
 					Code:    "missing_conversation_id",
 					Message: "missing conversation_id",
 				}
-				c.Send <- []byte(errMssg.Message)
+				select {
+				case c.Send <- []byte(errMssg.Message):
+				default:
+					log.Printf("send buffer full for device %s; dropping error message", c.DeviceID)
+				}
 				continue
 			}
 
@@ -143,7 +160,11 @@ func (c *WsClient) ReadPump() {
 					Code:    "missing_client_message_id",
 					Message: "missing client_message_id",
 				}
-				c.Send <- []byte(errMssg.Message)
+				select {
+				case c.Send <- []byte(errMssg.Message):
+				default:
+					log.Printf("send buffer full for device %s; dropping error message", c.DeviceID)
+				}
 				continue
 			}
 
@@ -163,18 +184,26 @@ func (c *WsClient) ReadPump() {
 						Code:    "message_exists",
 						Message: "message already exists",
 					}
-					c.Send <- []byte(errMssg.Message)
+					select {
+					case c.Send <- []byte(errMssg.Message):
+					default:
+						log.Printf("send buffer full for device %s; dropping error message", c.DeviceID)
+					}
 					continue
 				}
 				log.Println("incoming message:", err)
-			}
+			} else {
+				ack := SendMessageAck{
+					Type:            "message_ack",
+					ClientMessageID: req.ClientMessageID,
+				}
 
-			ack := SendMessageAck{
-				Type:            "message_ack",
-				ClientMessageID: req.ClientMessageID,
+				select {
+				case c.Send <- []byte(ack.ClientMessageID.String()):
+				default:
+					log.Printf("send buffer full for device %s; dropping message ack", c.DeviceID)
+				}
 			}
-
-			c.Send <- []byte(ack.ClientMessageID.String())
 		}
 
 		if req.Type == "read_receipt" {
@@ -220,6 +249,7 @@ func (c *WsClient) WritePump() {
 			)
 
 			if err != nil {
+				// TODO: again put the message in send channel of this client?
 				return
 			}
 

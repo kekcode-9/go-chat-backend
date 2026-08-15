@@ -57,7 +57,7 @@ func main() {
 	// -------------------------------------------------
 	auth.Init(cfg)
 
-	wsConManager := websocket.NewWsConManager()
+	wsConManager := websocket.NewWsConManager(redisClient)
 
 	conversationService := conversations.NewConversationService(pool)
 

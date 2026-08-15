@@ -146,6 +146,7 @@ func (r *Repository) CreateReadReceipt(
 
 	// update the participant record with the read receipt details
 
+	// dont update if new sequenceNo is lower than the existing last_read_mssg_seq
 	_, err = tx.Exec(
 		ctx,
 		`
@@ -153,6 +154,7 @@ func (r *Repository) CreateReadReceipt(
 		SET last_read_message_id = $1,
 			last_read_mssg_seq = $2
 		WHERE id = $3
+			AND COALESCE(last_read_mssg_seq, 0) < $2
 		`,
 		messageID,
 		sequenceNo,

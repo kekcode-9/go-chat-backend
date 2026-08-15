@@ -157,13 +157,24 @@ func (m *MessageService) InMssgHandler(
 	// Find conversation participants.
 	// ------------------------------------------------------------------
 
-	userIDs, err := m.conversationStore.FindConversationParticipants(
+	participants, err := m.conversationStore.FindConversationParticipants(
 		ctx,
 		conversationID,
 	)
 
 	if err != nil {
 		return err
+	}
+
+	userIDs := make([]uuid.UUID, 0, len(participants))
+	senderName := ""
+
+	for _, participant := range participants {
+		userIDs = append(userIDs, participant.UserID)
+
+		if participant.UserID == senderUserID {
+			senderName = participant.UserName
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -227,8 +238,7 @@ func (m *MessageService) InMssgHandler(
 
 			SenderUserID: senderUserID,
 
-			// TODO: Replace with actual sender name lookup.
-			SenderName: "",
+			SenderName: senderName,
 
 			TargetDeviceIDs: targetDevices,
 
@@ -242,6 +252,7 @@ func (m *MessageService) InMssgHandler(
 			backendID,
 			chatMessage,
 		); err != nil {
+			// TODO: retry publishing for this backend only
 			return err
 		}
 	}
@@ -275,6 +286,40 @@ func (m *MessageService) publishToBackend(
 // ---------------------------------------------
 // Other logics
 // ---------------------------------------------
+
+func (m *MessageService) postReadReceipt(
+	conversationID uuid.UUID,
+	userID uuid.UUID,
+	messageID uuid.UUID,
+	sequenceNo int64,
+) error {
+	ctx := context.Background()
+
+	tx, err := m.repo.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback(ctx)
+
+	if err := m.repo.CreateReadReceipt(
+		ctx,
+		tx,
+		conversationID,
+		userID,
+		messageID,
+		sequenceNo,
+	); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (m *MessageService) getMessages(
 	conversationID uuid.UUID,
 	limit int,
