@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -19,6 +20,8 @@ const (
 	pongWait = 60 * time.Second
 
 	pingPeriod = (pongWait * 9) / 10
+
+	presenceTTL = 2 * pongWait // 120s
 
 	maxMessageSize = 1024 * 64
 )
@@ -57,9 +60,21 @@ func NewWsClient(
 
 func (c *WsClient) Run() {
 	c.WsConManager.Register <- c
+	c.refreshPresence()
 
 	go c.WritePump()
 	go c.ReadPump()
+}
+
+func (c *WsClient) refreshPresence() {
+	if err := c.WsConManager.redisClient.Set(
+		context.Background(),
+		"presence:user:"+c.UserID.String(),
+		"online",
+		presenceTTL,
+	).Err(); err != nil {
+		log.Printf("failed to refresh presence for user %s: %v", c.UserID, err)
+	}
 }
 
 func (c *WsClient) Close() {
@@ -91,6 +106,7 @@ func (c *WsClient) ReadPump() {
 		the pong handler again resets the read deadline, not allowing the connection to die.
 	*/
 	c.Conn.SetPongHandler(func(string) error {
+		c.refreshPresence()
 		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})

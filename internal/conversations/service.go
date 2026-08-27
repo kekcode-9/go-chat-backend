@@ -2,24 +2,27 @@ package conversations
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type ConversationService struct {
-	repo *Repository
-	Repo *Repository
+	Repo        *Repository
+	redisClient *redis.Client
 }
 
 func NewConversationService(
 	db *pgxpool.Pool,
+	redisClient *redis.Client,
 ) *ConversationService {
 	repo := NewRepository(db)
 
 	return &ConversationService{
-		repo: repo,
-		Repo: repo,
+		Repo:        repo,
+		redisClient: redisClient,
 	}
 }
 
@@ -28,7 +31,7 @@ func (c *ConversationService) getUserConversations(
 ) (*GetConversationsResponse, error) {
 	ctx := context.Background()
 
-	rows, err := c.repo.GetAllUserConversations(
+	rows, err := c.Repo.GetAllUserConversations(
 		ctx,
 		req.UserID,
 	)
@@ -80,7 +83,7 @@ func (c *ConversationService) createConversation(
 ) (*CreateConversationResponse, error) {
 	ctx := context.Background()
 
-	tx, err := c.repo.db.Begin(ctx)
+	tx, err := c.Repo.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +108,7 @@ func (c *ConversationService) createConversation(
 
 	if conversationType == "direct" {
 		// Check if a direct conversation already exists between the two users.
-		existingConversationID, err := c.repo.FindDirectConversationBetweenUsers(
+		existingConversationID, err := c.Repo.FindDirectConversationBetweenUsers(
 			ctx,
 			req.RequestingUserID,
 			req.OtherUserID,
@@ -120,7 +123,7 @@ func (c *ConversationService) createConversation(
 		}
 	}
 
-	conversationID, err := c.repo.CreateNewConversation(
+	conversationID, err := c.Repo.CreateNewConversation(
 		ctx,
 		tx,
 		NewConversation{
@@ -134,7 +137,7 @@ func (c *ConversationService) createConversation(
 	}
 
 	// Creator becomes admin.
-	err = c.repo.CreateNewParticipant(
+	err = c.Repo.CreateNewParticipant(
 		ctx,
 		tx,
 		NewParticipant{
@@ -149,7 +152,7 @@ func (c *ConversationService) createConversation(
 	}
 
 	// Other user joins as member.
-	err = c.repo.CreateNewParticipant(
+	err = c.Repo.CreateNewParticipant(
 		ctx,
 		tx,
 		NewParticipant{
@@ -169,5 +172,72 @@ func (c *ConversationService) createConversation(
 
 	return &CreateConversationResponse{
 		ConversationID: conversationID,
+	}, nil
+}
+
+func (c *ConversationService) getParticipants(
+	conversationID uuid.UUID,
+	callerUserID uuid.UUID,
+) (*ConversationParticipants, error) {
+	ctx := context.Background()
+
+	verifiedUser, err := c.Repo.VerifyConversationParticipant(
+		ctx,
+		callerUserID,
+		conversationID,
+	)
+
+	if err != nil {
+		if errors.Is(err, ErrUserNotActiveParticipant) {
+			return nil, ErrUserNotActiveParticipant
+		}
+		return nil, err
+	}
+
+	if verifiedUser == uuid.Nil {
+		return nil, ErrUserNotActiveParticipant
+	}
+
+	participants, err := c.Repo.FindConversationParticipants(
+		ctx,
+		conversationID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var resParticipants []ParticipantWithPresence
+
+	for _, participant := range participants {
+		if participant.UserID == callerUserID {
+			continue
+		}
+
+		_, err := c.redisClient.Get(
+			ctx,
+			"presence:user:"+participant.UserID.String(),
+		).Result()
+
+		isOnline := true
+
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				isOnline = false
+			} else {
+				// Some real Redis/client error happened
+				return nil, err
+			}
+		}
+
+		resParticipants = append(resParticipants, ParticipantWithPresence{
+			ParticipantID:   participant.UserID,
+			ParticipantName: participant.UserName,
+			IsOnline:        isOnline,
+		})
+	}
+
+	return &ConversationParticipants{
+		Participants: resParticipants,
 	}, nil
 }

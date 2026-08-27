@@ -30,4 +30,8 @@ var (
 	ErrDirectConversationAlreadyExists = errors.New(
 		"direct conversation already exists between the two users",
 	)
+
+	ErrUserNotActiveParticipant = errors.New(
+		"the user is not an active participant of the conversation",
+	)
 )

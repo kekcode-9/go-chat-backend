@@ -2,6 +2,7 @@ package conversations
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kekcode-9/go-chat-backend/internal/platform/models"
 
@@ -19,41 +20,6 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 		db: db,
 	}
 }
-
-/*
-CREATE TABLE conversations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    type TEXT NOT NULL DEFAULT 'direct' CHECK (type IN ('direct', 'group')),
-    title TEXT,
-    description TEXT,
-    avatar_url TEXT,
-    created_by UUID NOT NULL REFERENCES users(id),
-    next_sequence_no BIGINT NOT NULL DEFAULT 1
-);
-*/
-
-/*
-CREATE TABLE conversation_participants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'left', 'removed')),
-    conversation_id UUID NOT NULL REFERENCES conversations(id),
-    user_id UUID NOT NULL REFERENCES users(id),
-    left_at TIMESTAMPTZ,
-    removed_at TIMESTAMPTZ,
-    removed_by UUID REFERENCES users(id),
-    is_muted BOOLEAN NOT NULL DEFAULT FALSE,
-    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
-    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
-    last_read_message_id UUID REFERENCES messages(id),
-    last_read_mssg_seq BIGINT,
-    UNIQUE (conversation_id, user_id)
-);
-
-CREATE INDEX idx_conv_participants_user ON conversation_participants (user_id);
-*/
 
 // GetAllUserConversations returns one row per participant.
 // The service layer is responsible for grouping the rows by conversation.
@@ -214,6 +180,37 @@ func (r *Repository) FindDirectConversationBetweenUsers(
 	}
 
 	return uuid.Nil, nil // No direct conversation found
+}
+
+func (r *Repository) VerifyConversationParticipant(
+	ctx context.Context,
+	userID uuid.UUID,
+	conversationID uuid.UUID,
+) (uuid.UUID, error) {
+	var participantID uuid.UUID
+
+	err := r.db.QueryRow(
+		ctx,
+		`
+			SELECT user_id
+			FROM conversation_participants
+			WHERE 
+				user_id = $1
+				AND conversation_id = $2
+				AND status = 'active'
+		`,
+		userID,
+		conversationID,
+	).Scan(&participantID)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, ErrUserNotActiveParticipant
+		}
+		return uuid.Nil, err
+	}
+
+	return participantID, nil
 }
 
 // -----------------------------------------------------------------------------

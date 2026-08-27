@@ -41,6 +41,20 @@ type CreateConversationResponse struct {
 }
 
 // ---------------------------------------
+// Get conversation participants
+// ---------------------------------------
+
+type ParticipantWithPresence struct {
+	ParticipantID   uuid.UUID `json:"participant_id"`
+	ParticipantName string    `json:"participant_name"`
+	IsOnline        bool      `json:"is_online"`
+}
+
+type ConversationParticipants struct {
+	Participants []ParticipantWithPresence `json:"participants"`
+}
+
+// ---------------------------------------
 // Repository models
 // ---------------------------------------
 

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/kekcode-9/go-chat-backend/internal/auth"
 )
 
@@ -14,6 +15,8 @@ func (c *ConversationService) RegisterRoutes(
 ) {
 	// To fetch all conversations of the user
 	mux.HandleFunc("GET /conversations", c.getConversationsHandler)
+
+	mux.HandleFunc("GET /conversations/{id}/participants", c.getParticipantsHandler)
 
 	mux.HandleFunc("POST /conversations", c.postConversationHandler)
 
@@ -183,6 +186,76 @@ func (c *ConversationService) postConversationHandler(w http.ResponseWriter, r *
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("failed to encode create conversation response: %v", err)
+	}
+}
+
+func (c *ConversationService) getParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+	conversationID := r.PathValue("id")
+
+	if conversationID == "" {
+		http.Error(
+			w,
+			"id path parameter is required",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(
+			w,
+			"missing auth claims",
+			http.StatusUnauthorized,
+		)
+		return
+	}
+
+	convoUUID, err := uuid.Parse(conversationID)
+
+	if err != nil {
+		http.Error(
+			w,
+			"invalid id in path",
+			http.StatusBadRequest,
+		)
+
+		return
+	}
+
+	resp, err := c.getParticipants(
+		convoUUID,
+		claims.UserID,
+	)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotActiveParticipant):
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusForbidden,
+			)
+		default:
+			http.Error(
+				w,
+				"internal server error",
+				http.StatusInternalServerError,
+			)
+		}
+		return
+	}
+
+	w.Header().Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf(
+			"failed to encode get conversation participants response: %v",
+			err,
+		)
 	}
 }
 

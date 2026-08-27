@@ -59,7 +59,7 @@ func main() {
 
 	wsConManager := websocket.NewWsConManager(redisClient)
 
-	conversationService := conversations.NewConversationService(pool)
+	conversationService := conversations.NewConversationService(pool, redisClient)
 
 	userService := users.NewUserService(pool)
 

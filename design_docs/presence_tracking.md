@@ -1,0 +1,6 @@
+  - When a websocket client starts, Run() sets presence:user:{user_id} to online with presenceTTL.
+  - WritePump() sends ping frames periodically.
+  - Browser/client responds with pong.
+  - ReadPump() receives the pong through SetPongHandler.
+  - The pong handler refreshes the same Redis key TTL.
+  - If all devices for that user go offline, no client refreshes the key anymore, so Redis expires it and the user becomes offline.
