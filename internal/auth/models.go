@@ -17,6 +17,12 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+type AuthResponse struct {
+	AccessToken string     `json:"access_token"`
+	UserID      *uuid.UUID `json:"user_id,omitempty"`
+	DeviceID    *uuid.UUID `json:"device_id,omitempty"`
+}
+
 // -----------------------------------------
 // Sign up models
 // -----------------------------------------
@@ -29,6 +35,8 @@ type SignupRequest struct {
 type SignupResponse struct {
 	AccessToken  string
 	RefreshToken string
+	UserID       uuid.UUID
+	DeviceID     uuid.UUID
 }
 
 // ----------------------------------------
@@ -43,6 +51,7 @@ type LoginRequest struct {
 type LoginResponse struct {
 	AccessToken  string
 	RefreshToken string
+	UserID       uuid.UUID
 	DeviceID     uuid.UUID
 }
 

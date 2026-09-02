@@ -10,6 +10,8 @@ import (
 	"github.com/mileusna/useragent"
 )
 
+const refreshTokenHeader = "X-Refresh-Token"
+
 func (a *AuthService) RegisterRoutes(
 	mux *http.ServeMux,
 ) {
@@ -40,64 +42,33 @@ func writeAuthResponse(
 	status int,
 	accessToken string,
 	refreshToken string,
+	userID *uuid.UUID,
 	deviceID *uuid.UUID,
 ) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    refreshToken,
-		Path:     "/auth/refresh",
-		HttpOnly: true,
-		Secure:   false, // true in production
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   30 * 24 * 60 * 60,
-	})
-
+	w.Header().Set(refreshTokenHeader, refreshToken)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
-	if deviceID != nil {
-		if err := json.NewEncoder(w).Encode(struct {
-			AccessToken string    `json:"access_token"`
-			DeviceID    uuid.UUID `json:"device_id"`
-		}{
-			AccessToken: accessToken,
-			DeviceID:    *deviceID,
-		}); err != nil {
-			log.Printf("failed to encode auth response: %v", err)
-		}
-		return
+	resp := AuthResponse{
+		AccessToken: accessToken,
+		UserID:      userID,
+		DeviceID:    deviceID,
 	}
 
-	if err := json.NewEncoder(w).Encode(struct {
-		AccessToken string `json:"access_token"`
-	}{
-		AccessToken: accessToken,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("failed to encode auth response: %v", err)
 	}
-}
-
-func clearRefreshCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/auth/refresh",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   false, // true in production
-		SameSite: http.SameSiteStrictMode,
-	})
 }
 
 // signupHandler godoc
 //
 // @Summary Sign up a user
-// @Description Creates a new user account and returns an access token. The refresh token is set in an HttpOnly cookie.
+// @Description Creates a new user account and returns an access token. The refresh token is returned in the X-Refresh-Token response header.
 // @Tags auth
 // @Accept json
 // @Produce json
 // @Param request body SignupRequest true "Signup request"
-// @Success 201 {object} map[string]string
+// @Success 201 {object} AuthResponse
 // @Failure 400 {string} string "invalid request body"
 // @Failure 409 {string} string "email already exists"
 // @Failure 500 {string} string "internal server error"
@@ -151,19 +122,20 @@ func (a *AuthService) signupHandler(
 		http.StatusCreated,
 		resp.AccessToken,
 		resp.RefreshToken,
-		nil,
+		&resp.UserID,
+		&resp.DeviceID,
 	)
 }
 
 // loginHandler godoc
 //
 // @Summary Log in a user
-// @Description Authenticates a user and returns an access token. The refresh token is set in an HttpOnly cookie. When logging in from a new device, the device_id should be omitted from the request body. The server will create a new device_id in such cases and retrun it to frontend. From subsequent logins from the same device, the device_id should be sent in the request body.
+// @Description Authenticates a user and returns an access token. The refresh token is returned in the X-Refresh-Token response header. When logging in from a new device, the device_id should be omitted from the request body. The server will create a new device_id in such cases and retrun it to frontend. From subsequent logins from the same device, the device_id should be sent in the request body.
 // @Tags auth
 // @Accept json
 // @Produce json
 // @Param request body LoginRequest true "Login request"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} AuthResponse
 // @Failure 400 {string} string "invalid request body"
 // @Failure 401 {string} string "invalid credentials or unknown device"
 // @Failure 404 {string} string "user not found"
@@ -234,6 +206,7 @@ func (a *AuthService) loginHandler(
 		http.StatusOK,
 		resp.AccessToken,
 		resp.RefreshToken,
+		&resp.UserID,
 		&resp.DeviceID,
 	)
 }
@@ -241,11 +214,11 @@ func (a *AuthService) loginHandler(
 // refreshHandler godoc
 //
 // @Summary Refresh access token
-// @Description Uses the refresh_token cookie to issue a new access token and rotate the refresh token cookie.
+// @Description Uses the X-Refresh-Token request header to issue a new access token and rotate the refresh token. The new refresh token is returned in the X-Refresh-Token response header.
 // @Tags auth
 // @Produce json
-// @Param Cookie header string true "refresh_token cookie"
-// @Success 200 {object} map[string]string
+// @Param X-Refresh-Token header string true "Refresh token"
+// @Success 200 {object} AuthResponse
 // @Failure 401 {string} string "missing, invalid, expired, or reused refresh token"
 // @Failure 500 {string} string "internal server error"
 // @Router /auth/refresh/ [post]
@@ -253,28 +226,17 @@ func (a *AuthService) refreshHandler(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	cookie, err := r.Cookie("refresh_token")
-	if err != nil {
-		if errors.Is(err, http.ErrNoCookie) {
-			http.Error(
-				w,
-				"refresh token cookie not found",
-				http.StatusUnauthorized,
-			)
-			return
-		}
-
-		log.Printf("failed reading refresh cookie: %v", err)
-
+	refreshToken := r.Header.Get(refreshTokenHeader)
+	if refreshToken == "" {
 		http.Error(
 			w,
-			"internal server error",
-			http.StatusInternalServerError,
+			"refresh token header not found",
+			http.StatusUnauthorized,
 		)
 		return
 	}
 
-	resp, err := a.refresh(cookie.Value)
+	resp, err := a.refresh(refreshToken)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidRefreshToken):
@@ -312,13 +274,14 @@ func (a *AuthService) refreshHandler(
 		resp.AccessToken,
 		resp.RefreshToken,
 		nil,
+		nil,
 	)
 }
 
 // logoutHandler godoc
 //
 // @Summary Log out current device
-// @Description Revokes the current device session and clears the refresh token cookie.
+// @Description Revokes the current device session.
 // @Tags auth
 // @Security BearerAuth
 // @Success 204 "No Content"
@@ -357,8 +320,6 @@ func (a *AuthService) logoutHandler(
 		)
 		return
 	}
-
-	clearRefreshCookie(w)
 
 	w.WriteHeader(http.StatusNoContent)
 }

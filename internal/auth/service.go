@@ -123,6 +123,8 @@ func (a *AuthService) signup(
 	return &SignupResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
+		UserID:       userID,
+		DeviceID:     deviceID,
 	}, nil
 }
 
@@ -235,6 +237,7 @@ func (a *AuthService) login(
 	return &LoginResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
+		UserID:       existingUser.ID,
 		DeviceID:     *deviceID,
 	}, nil
 }
