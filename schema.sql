@@ -33,7 +33,7 @@ CREATE TABLE conversations (
 -- =============================================================================
 
 CREATE TABLE messages (
-    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                   UUID PRIMARY KEY,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     sender_id            UUID NOT NULL REFERENCES users(id),
     conversation_id      UUID NOT NULL REFERENCES conversations(id),

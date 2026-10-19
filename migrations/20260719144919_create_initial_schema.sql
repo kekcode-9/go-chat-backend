@@ -34,7 +34,7 @@ CREATE TABLE conversations (
 -- (created before conversation_participants so the FK on last_read_message_id works)
 -- =============================================================================
 CREATE TABLE messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     sender_id UUID NOT NULL REFERENCES users(id),
     conversation_id UUID NOT NULL REFERENCES conversations(id),
@@ -43,8 +43,9 @@ CREATE TABLE messages (
     updated_at TIMESTAMPTZ,
     reply_to_message_id UUID REFERENCES messages(id),
     sequence_no BIGINT NOT NULL DEFAULT 1,
-    client_message_id UUID UNIQUE,
-    UNIQUE (conversation_id, sequence_no)
+    client_message_id UUID,
+    UNIQUE (conversation_id, sequence_no),
+    UNIQUE (sender_id, client_message_id)
 );
 
 CREATE INDEX idx_messages_conversation_sequence ON messages (conversation_id, sequence_no);

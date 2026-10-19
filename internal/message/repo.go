@@ -68,12 +68,18 @@ func (r *Repository) CreateMessage(
 	sequenceNo int64,
 ) (*CreateMessageResp, error) {
 
+	messageID, err := uuid.NewV7()
+	if err != nil {
+		return nil, err
+	}
+
 	resp := &CreateMessageResp{}
 
-	err := tx.QueryRow(
+	err = tx.QueryRow(
 		ctx,
 		`
 		INSERT INTO messages (
+			id,
 			sender_id,
 			conversation_id,
 			content,
@@ -81,7 +87,7 @@ func (r *Repository) CreateMessage(
 			client_message_id,
 			sequence_no
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (sender_id, client_message_id) DO NOTHING
 		RETURNING
 			id,
@@ -89,6 +95,7 @@ func (r *Repository) CreateMessage(
 			sequence_no,
 			created_at
 		`,
+		messageID,
 		req.SenderUserID,
 		req.ConversationID,
 		req.Content,

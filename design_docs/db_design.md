@@ -65,6 +65,8 @@ INDEX(user_id) // Listing all convos of a user
 
 When updating `last_read_message_id`, `last_read_mssg_seq` also has to be updated and vice versa.
 # `messages` table
+Message IDs are UUIDv7 values generated in Go using `uuid.NewV7()` and explicitly supplied on insert. PostgreSQL stores them as `UUID`; Go uses `uuid.UUID`. Message references use the same representation. Conversation ordering continues to use `sequence_no`, and `client_message_id` remains a separate client-generated retry identifier.
+
 I would **never** make `messages.id` a BIGSERIAL.
 
 Reasons:

@@ -2,6 +2,8 @@
 
 This document captures the current backend contract and the frontend flows needed for a browser client for this chat application.
 
+Server-generated message IDs (`message_id`, including `read_message_id` references) are UUIDv7 strings. Clients pass these IDs back unchanged. Conversation ordering uses `sequence_no`; `client_message_id` remains a separate client-generated UUID for retry deduplication.
+
 ## Backend Overview
 
 - Default HTTP base URL: `http://localhost:8080`
@@ -487,7 +489,7 @@ Success `200`:
   "limit": "00000000-0000-0000-0000-000000000000",
   "messages": [
     {
-      "message_id": "uuid",
+      "message_id": "uuidv7",
       "conversation_id": "uuid",
       "sequence_no": 1,
       "sender_user_id": "uuid",
@@ -527,7 +529,7 @@ Request:
 
 ```json
 {
-  "message_id": "uuid",
+  "message_id": "uuidv7",
   "sequence_no": 123
 }
 ```
@@ -589,7 +591,7 @@ Recommended backend ack shape for future:
 {
   "type": "message_ack",
   "client_message_id": "uuid",
-  "message_id": "uuid",
+  "message_id": "uuidv7",
   "conversation_id": "uuid",
   "sequence_no": 123,
   "timestamp": "2026-09-02T10:00:00Z"
@@ -600,7 +602,7 @@ Recommended backend ack shape for future:
 
 ```json
 {
-  "message_id": "uuid",
+  "message_id": "uuidv7",
   "conversation_id": "uuid",
   "sequence_no": 123,
   "sender_user_id": "uuid",
@@ -623,7 +625,7 @@ Frontend behavior:
 {
   "type": "read_receipt",
   "conversation_id": "uuid",
-  "read_message_id": "uuid",
+  "read_message_id": "uuidv7",
   "read_message_seq_no": 123
 }
 ```

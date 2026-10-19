@@ -1,0 +1,4 @@
+- [ ] Backend needs to inform frontend of user presence proactively. 
+- [ ] introduce an API in `internal/users/` for getting user profile (include presence information).
+- [ ] consider making the `content` column of `messages` table a `JSONB`
+- [ ] consider declarative partitioning in the `messages` table. Example: month-wise partitioning

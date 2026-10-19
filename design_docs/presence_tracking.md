@@ -4,3 +4,4 @@
   - ReadPump() receives the pong through SetPongHandler.
   - The pong handler refreshes the same Redis key TTL.
   - If all devices for that user go offline, no client refreshes the key anymore, so Redis expires it and the user becomes offline.
+  - `GET /conversations/{id}/participants` gives active participants of a conversation along with their presence info. Backend does not proactively send presence information.
