@@ -3,6 +3,10 @@ package message
 import "errors"
 
 var (
+	ErrConversationAccessDenied = errors.New(
+		"user is not a participant of the conversation",
+	)
+
 	// Conversation does not exist.
 	ErrConversationNotFound = errors.New(
 		"conversation not found",

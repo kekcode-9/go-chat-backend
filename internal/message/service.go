@@ -119,6 +119,19 @@ func (m *MessageService) InMssgHandler(
 
 	defer tx.Rollback(ctx)
 
+	participant, err := m.conversationStore.GetConversationParticipantState(
+		ctx,
+		tx,
+		senderUserID,
+		conversationID,
+	)
+	if err != nil {
+		return err
+	}
+	if participant == nil || participant.Status != "active" {
+		return ErrNotConversationParticipant
+	}
+
 	sequenceNo, err := m.repo.AllocateSequenceNumber(
 		ctx,
 		tx,
@@ -322,6 +335,7 @@ func (m *MessageService) postReadReceipt(
 
 func (m *MessageService) getMessages(
 	conversationID uuid.UUID,
+	userID uuid.UUID,
 	limit int,
 	seqNo *int64,
 	getAfter bool,
@@ -340,6 +354,27 @@ func (m *MessageService) getMessages(
 
 	defer tx.Rollback(ctx)
 
+	participant, err := m.conversationStore.GetConversationParticipantState(
+		ctx,
+		tx,
+		userID,
+		conversationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if participant == nil {
+		return nil, ErrConversationAccessDenied
+	}
+
+	var maxSequenceNo *int64
+	if participant.Status != "active" {
+		if participant.LastReadMessageSequence == nil {
+			return nil, nil
+		}
+		maxSequenceNo = participant.LastReadMessageSequence
+	}
+
 	var messages []Message
 
 	if seqNo == nil {
@@ -348,6 +383,7 @@ func (m *MessageService) getMessages(
 			tx,
 			conversationID,
 			limit,
+			maxSequenceNo,
 		)
 	} else if getAfter {
 		messages, err = m.repo.getMessagesAfter(
@@ -356,6 +392,7 @@ func (m *MessageService) getMessages(
 			conversationID,
 			limit,
 			*seqNo,
+			maxSequenceNo,
 		)
 	} else {
 		messages, err = m.repo.getMessagesBefore(
@@ -364,6 +401,7 @@ func (m *MessageService) getMessages(
 			conversationID,
 			limit,
 			*seqNo,
+			maxSequenceNo,
 		)
 	}
 

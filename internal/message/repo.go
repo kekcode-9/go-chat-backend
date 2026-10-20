@@ -184,6 +184,7 @@ func (r *Repository) getLatestMessages(
 	tx pgx.Tx,
 	conversationID uuid.UUID,
 	limit int,
+	maxSequenceNo *int64,
 ) ([]Message, error) {
 	rows, err := tx.Query(
 		ctx,
@@ -203,6 +204,7 @@ func (r *Repository) getLatestMessages(
 					ON m.sender_id = u.id
 				WHERE
 					m.conversation_id = $1
+					AND ($3::bigint IS NULL OR m.sequence_no <= $3)
 				ORDER BY m.sequence_no DESC
 				LIMIT $2
 			) latest
@@ -210,6 +212,7 @@ func (r *Repository) getLatestMessages(
 		`,
 		conversationID,
 		limit,
+		maxSequenceNo,
 	)
 
 	if err != nil {
@@ -225,6 +228,7 @@ func (r *Repository) getMessagesBefore(
 	conversationID uuid.UUID,
 	limit int,
 	seqNo int64,
+	maxSequenceNo *int64,
 ) ([]Message, error) {
 	rows, err := tx.Query(
 		ctx,
@@ -245,6 +249,7 @@ func (r *Repository) getMessagesBefore(
 				WHERE
 					m.conversation_id = $1
 					AND m.sequence_no < $2
+					AND ($4::bigint IS NULL OR m.sequence_no <= $4)
 				ORDER BY m.sequence_no DESC
 				LIMIT $3
 			) latest
@@ -253,6 +258,7 @@ func (r *Repository) getMessagesBefore(
 		conversationID,
 		seqNo,
 		limit,
+		maxSequenceNo,
 	)
 
 	if err != nil {
@@ -268,6 +274,7 @@ func (r *Repository) getMessagesAfter(
 	conversationID uuid.UUID,
 	limit int,
 	seqNo int64,
+	maxSequenceNo *int64,
 ) ([]Message, error) {
 	rows, err := tx.Query(
 		ctx,
@@ -286,12 +293,14 @@ func (r *Repository) getMessagesAfter(
 			WHERE
 				m.conversation_id = $1
 				AND m.sequence_no > $2
+				AND ($4::bigint IS NULL OR m.sequence_no <= $4)
 			ORDER BY m.sequence_no ASC
 			LIMIT $3
 		`,
 		conversationID,
 		seqNo,
 		limit,
+		maxSequenceNo,
 	)
 
 	if err != nil {

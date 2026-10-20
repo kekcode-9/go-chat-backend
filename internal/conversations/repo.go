@@ -182,6 +182,37 @@ func (r *Repository) FindDirectConversationBetweenUsers(
 	return uuid.Nil, nil // No direct conversation found
 }
 
+func (r *Repository) GetConversationParticipantState(
+	ctx context.Context,
+	tx pgx.Tx,
+	userID uuid.UUID,
+	conversationID uuid.UUID,
+) (*models.ConversationParticipantState, error) {
+	var participant models.ConversationParticipantState
+
+	err := tx.QueryRow(
+		ctx,
+		`
+		SELECT status, last_read_mssg_seq
+		FROM conversation_participants
+		WHERE user_id = $1
+			AND conversation_id = $2
+		FOR SHARE
+		`,
+		userID,
+		conversationID,
+	).Scan(&participant.Status, &participant.LastReadMessageSequence)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &participant, nil
+}
+
 func (r *Repository) VerifyConversationParticipant(
 	ctx context.Context,
 	userID uuid.UUID,

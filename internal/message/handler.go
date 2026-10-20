@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -24,7 +25,7 @@ func (m *MessageService) RegisterRoutes(
 // getMessagesHandler godoc
 //
 // @Summary List conversation messages
-// @Description Returns messages for a conversation. If before_seq is provided, messages before that sequence are returned. If after_seq is provided, messages after that sequence are returned. If neither is provided, the latest messages are returned.
+// @Description Returns messages for a conversation. Active participants can fetch all messages; left or removed participants can fetch only through their last read sequence, inclusive. If before_seq is provided, messages before that sequence are returned. If after_seq is provided, messages after that sequence are returned. If neither is provided, the latest accessible messages are returned.
 // @Tags messages
 // @Produce json
 // @Security BearerAuth
@@ -35,9 +36,16 @@ func (m *MessageService) RegisterRoutes(
 // @Success 200 {object} GetConversationMessagesResponse
 // @Failure 400 {string} string "invalid request parameters"
 // @Failure 401 {string} string "missing or invalid access token"
+// @Failure 403 {string} string "user is not a participant of the conversation"
 // @Failure 500 {string} string "internal server error"
 // @Router /conversations/{id}/messages [get]
 func (m *MessageService) getMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		http.Error(w, "missing auth claims", http.StatusUnauthorized)
+		return
+	}
+
 	/*
 	* possible query params:
 	* before_seq
@@ -49,7 +57,7 @@ func (m *MessageService) getMessagesHandler(w http.ResponseWriter, r *http.Reque
 	* Behavior
 	* If limit is not present then set default value to 100, else read value from query param
 	* read conversation_id from the id path param
-	* if neither before_seq, nor after_seq is present then call m.getMessages(conversation_id, limit, nil, true)
+	* if neither before_seq, nor after_seq is present then call m.getMessages(conversation_id, claims.UserID, limit, nil, true)
 	* if either before_seq or after_seq is present then pass that as the third argument and if it
 	* is before_seq then pass the fourth argument as false and if it is before_seq then pass the fourth argument
 	* as true
@@ -141,11 +149,16 @@ func (m *MessageService) getMessagesHandler(w http.ResponseWriter, r *http.Reque
 
 	messages, err := m.getMessages(
 		conversationID,
+		claims.UserID,
 		limit,
 		seqNo,
 		getAfter,
 	)
 	if err != nil {
+		if errors.Is(err, ErrConversationAccessDenied) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 		log.Printf("get messages failed: %v", err)
 
 		http.Error(

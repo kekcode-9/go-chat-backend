@@ -58,9 +58,9 @@ Server-generated message IDs (`message_id`, including `read_message_id` referenc
    - The repository path for an unknown device currently returns the raw no-row database error before the service converts it to `ErrUnknownDevice`.
    - Frontend should still clear stale `device_id` on either `401 unknown device` or a repeatable login failure after sending a stored `device_id`.
 
-7. Message fetch/send paths do not currently verify conversation membership.
-   - The endpoints are protected by access token, but `GET /conversations/{id}/messages` and WebSocket message send do not check that the caller is an active participant before accessing the conversation.
-   - A production frontend should still only expose conversations returned by `GET /conversations`, but this should be fixed on the backend.
+7. Message history and sending enforce conversation permissions.
+   - History returns `403` for nonparticipants. Active participants retain full history access; left or removed participants can fetch only through their recorded last-read sequence, inclusive.
+   - WebSocket sends require active participation. Rejected sends are logged without a success acknowledgment; existing error-frame behavior is unchanged.
 
 ## Frontend App Areas
 
@@ -333,7 +333,7 @@ Errors:
 - `401 missing or invalid access token`
 - `500 internal server error`
 
-Security note: current backend code does not verify active conversation membership before returning messages.
+Message history requires a participant record. Left or removed participants retain access only through their recorded last-read sequence.
 
 ### Block User
 
@@ -468,6 +468,10 @@ Rules:
 
 - Do not send `before_seq` and `after_seq` together.
 - Messages are returned in ascending `sequence_no`.
+- Active participants retain the existing history behavior.
+- Left or removed participants receive only messages at or below their `last_read_mssg_seq`, including when using either pagination cursor. With no recorded read sequence, the result contains no messages.
+- Nonparticipants receive `403 user is not a participant of the conversation`.
+- Delayed read receipts remain accepted after leaving or removal and can advance the cutoff for subsequent history requests.
 
 Initial/latest load:
 
@@ -519,6 +523,7 @@ Errors:
 - `400 invalid after_seq`
 - `400 before_seq and after_seq cannot both be present`
 - `401 missing or invalid access token`
+- `403 user is not a participant of the conversation`
 - `500 internal server error`
 
 ### Submit Read Receipt Over REST
@@ -578,6 +583,7 @@ Frontend behavior:
 - Keep the same `client_message_id` if retrying the same message.
 - Do not send empty payloads.
 - Maximum incoming WebSocket message size on backend is 64 KiB.
+- Sending requires active participation in the target conversation; left, removed, and nonparticipant users cannot send messages to it.
 
 Current ack behavior:
 

@@ -22,6 +22,11 @@ type ConversationParticipant struct {
 	UserName string    `json:"user_name"`
 }
 
+type ConversationParticipantState struct {
+	Status                  string
+	LastReadMessageSequence *int64
+}
+
 // -----------------------------------------------------------------
 // DTO's (Data Transfer Objects) for the websocket protocol
 // -----------------------------------------------------------------
