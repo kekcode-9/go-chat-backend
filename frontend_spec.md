@@ -1,5 +1,7 @@
 # Frontend Client Specification
 
+The maintained, comprehensive frontend design is now [design_docs/markdown_chat_frontend_design.md](design_docs/markdown_chat_frontend_design.md). It covers the current API contracts, complete user flows, Markdown chat decisions, and unresolved integrations. Keep this earlier reference synchronized; where details differ, check current backend source and update both documents.
+
 This document captures the current backend contract and the frontend flows needed for a browser client for this chat application.
 
 Server-generated message IDs (`message_id`, including `read_message_id` references) are UUIDv7 strings. Clients pass these IDs back unchanged. Conversation ordering uses `sequence_no`; `client_message_id` remains a separate client-generated UUID for retry deduplication.
@@ -787,7 +789,7 @@ Do not include:
 
 - Raw access token
 - Passwords
-- Refresh token, which should not be accessible to JavaScript anyway
+- Refresh token; the current backend returns it in a JavaScript-readable header, so explicitly exclude it from debug exports
 
 ## Currently Unsupported Frontend Features
 
