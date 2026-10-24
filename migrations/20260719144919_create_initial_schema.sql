@@ -3,6 +3,7 @@ SELECT
     'up SQL query';
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- =============================================================================
 -- Users
@@ -164,12 +165,12 @@ CREATE TABLE sections (
     CONSTRAINT sections_nonempty_header CHECK (length(btrim(header)) > 0)
 );
 
-CREATE INDEX idx_sections_conversation_parent_created
-    ON sections (conversation_id, parent_section_id, created_at, id);
-
 CREATE INDEX idx_sections_conversation_boundaries
     ON sections (conversation_id, start_sequence_no, end_sequence_no)
     WHERE start_sequence_no IS NOT NULL;
+
+CREATE INDEX idx_sections_header_trgm
+    ON sections USING GIN (header gin_trgm_ops);
 
 CREATE TABLE section_references (
     id UUID PRIMARY KEY,
@@ -188,19 +189,20 @@ CREATE TABLE section_references (
         UNIQUE (message_id, referenced_section_id)
 );
 
-CREATE INDEX idx_section_references_conversation_target_message
-    ON section_references (conversation_id, referenced_section_id, message_id);
+CREATE INDEX idx_section_references_target_message
+    ON section_references (referenced_section_id, message_id);
 
 CREATE TABLE hashtags (
     id UUID PRIMARY KEY,
-    conversation_id UUID NOT NULL REFERENCES conversations(id),
     name TEXT COLLATE "C" NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    CONSTRAINT hashtags_conversation_id_id_key UNIQUE (conversation_id, id),
-    CONSTRAINT hashtags_conversation_name_key UNIQUE (conversation_id, name),
+    CONSTRAINT hashtags_name_key UNIQUE (name),
     CONSTRAINT hashtags_nonempty_name CHECK (length(name) > 0)
 );
+
+CREATE INDEX idx_hashtags_name_trgm
+    ON hashtags USING GIN (name gin_trgm_ops);
 
 CREATE TABLE message_hashtags (
     id UUID PRIMARY KEY,
@@ -213,13 +215,13 @@ CREATE TABLE message_hashtags (
         FOREIGN KEY (conversation_id, message_id)
         REFERENCES messages (conversation_id, id) ON DELETE CASCADE,
     CONSTRAINT message_hashtags_hashtag_fkey
-        FOREIGN KEY (conversation_id, hashtag_id)
-        REFERENCES hashtags (conversation_id, id),
+        FOREIGN KEY (hashtag_id)
+        REFERENCES hashtags (id),
     CONSTRAINT message_hashtags_message_target_key UNIQUE (message_id, hashtag_id)
 );
 
-CREATE INDEX idx_message_hashtags_conversation_tag_message
-    ON message_hashtags (conversation_id, hashtag_id, message_id);
+CREATE INDEX idx_message_hashtags_tag_message
+    ON message_hashtags (hashtag_id, message_id);
 
 CREATE TABLE message_reactions (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -346,5 +348,7 @@ DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS conversations;
 
 DROP TABLE IF EXISTS users;
+
+DROP EXTENSION IF EXISTS "pg_trgm";
 
 DROP EXTENSION IF EXISTS "pgcrypto";

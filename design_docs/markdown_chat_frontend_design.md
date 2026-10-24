@@ -18,6 +18,8 @@ Status labels:
 
 The backend design companion is [markdown_chat_backend_design.md](markdown_chat_backend_design.md). The root [frontend_spec.md](../frontend_spec.md) is the earlier integration reference. This document is the maintained comprehensive frontend design; on contradictions, verify current source and update both references. Do not invent request schemas or endpoints for unfinished features and present them as current APIs.
 
+The backend [operation catalogue](markdown_chat_backend_design.md#98-markdown-operation-catalogue) is the maintained checklist for message, reply, reaction, section, hashtag, pin, search, and navigation operations. It records behavioral cases rather than implemented command contracts. Hashtag mention editing preserves any old global identity still referenced, reuses an existing replacement-name identity, and otherwise creates a new identity or may rename the unused original under the documented conditions. Removing the final mention retains the dictionary record. Do not present a message-local edit as a global hashtag rename. Section/message deletion display and cleanup policies remain open where identified in the catalogue.
+
 ## 2. Context Summary for Resuming Work
 
 This is a Go chat backend with JWT access tokens, rotating refresh tokens, PostgreSQL persistence, Redis routing, and WebSockets. The frontend does not yet exist in this repository. No UI framework has been selected by this design.
@@ -34,9 +36,9 @@ Planned Markdown chat has nested, consecutive sequence-range sections; paired-nu
 
 Typing [[parent#child]] opens same-conversation autocomplete. Selecting a result stores a standard Markdown link [display label](section ID) in the message. The target ID disambiguates repeated headers; derived section-reference rows support reverse lookup/search. The user has confirmed standard link ordering. When a header is renamed, the frontend asks whether to update reference labels in the user's older messages. Yes updates persisted message content; no leaves the old labels while links still target the same IDs. Backend rename/edit/bulk-update APIs are not yet designed. Exact author scope, rename batching/failure handling, and parent-path propagation need final contracts; the working interpretation of "their older messages" is messages authored by the acting user, not permission to rewrite other authors' content.
 
-Hashtags are exact-case, exact-spelling conversation-local identities, searchable across nonconsecutive messages. Replies retain their exact reply_to_message_id and remain independent timeline messages; each message can show all reply descendants in a flat collapsible thread, including replies outside its section. Section, hashtag, edit, and thread APIs are not implemented. File-first conversation storage has been scrapped; CRDTs, MinIO, and Elasticsearch have not been adopted.
+Hashtags are exact-case, exact-spelling global identities shared across conversations, searchable across nonconsecutive messages and across conversations the caller can access. Name search uses case-sensitive substrings. Replies retain their exact reply_to_message_id and remain independent timeline messages; each message can show all reply descendants in a flat collapsible thread, including replies outside its section. Section, hashtag, edit, and thread APIs are not implemented. File-first conversation storage has been scrapped; CRDTs, MinIO, and Elasticsearch have not been adopted.
 
-Latest confirmed constraints: repeated mentions of the same hashtag or target section in one message create one association per distinct message/target pair. Hashtags have no click action; users explicitly search their exact strings. Parent and child sections may share identical boundaries, but overlapping sibling/unrelated section creation is rejected. These decisions are documented behavior for the future feature, not implemented routes.
+Latest confirmed constraints: repeated mentions of the same hashtag or target section in one message create one association per distinct message/target pair. Hashtags have no click action; users explicitly search names using case-sensitive substrings within or across accessible conversations. Parent and child sections may share identical boundaries, but overlapping sibling/unrelated section creation is rejected. These decisions are documented behavior for the future feature, not implemented routes.
 
 Physical-schema planning additionally confirmed that historical nonempty sections appear by message sequence ranges rather than their later creation times. Deleting a heading preserves messages and promotes its direct child headings; links to the deleted section remain visible but unavailable. The optional reference-existence boolean is omitted. The backend document's section 9.7 mirrors the consolidated initial migration with all 19 retained application tables. Existing databases do not automatically rerun that edited migration. Schema presence does not make pending Markdown APIs available.
 
@@ -520,6 +522,8 @@ Select a consecutive message range and choose a header/parent. Show the selected
 
 Place nonempty headings using their message ranges, even when created later around historical content. For D = 1–9 created after A = 10–20 and C = 21–30, render D before A; C remains the tail section for a possible explicit message 31. `created_at` still records creation chronology and is relevant for empty headings; do not blindly sort all nonempty sections by it.
 
+Concrete sibling example: A created 12:30 with 10–20, B created 16:00 with 48–100, and C created 20:10 with 30–42 render as A (10–20), messages 21–29, C (30–42), messages 43–47, B (48–100). Preserve their original IDs and headers. Inclusive endpoints mean 42 belongs to C and 48 is B's first message. Messages between the children remain in the common parent and should not disappear or acquire a child merely because the headings are sorted. This flow requires the future section-data API plus existing sequence-ordered messages; the current history payload alone does not include headings.
+
 ### 12.3 Send Through the Section Plus Control
 
 Show the action only when the section is eligible for a consecutive tail append. Selecting it places explicit section intent in the composer; show the target heading and allow cancellation. Ordinary sends remain ordinary.
@@ -577,15 +581,17 @@ Still open: one atomic rename/update operation versus a separately retried bulk 
 
 ### 14.1 Section and Message Search
 
-Search stays inside the selected conversation. Provide distinct intents: find section headers, search message content within a selected section, and find messages referencing a selected section. Resolve ambiguous headers to section IDs. Whether section-content search includes descendants and the exact matching/ranking rules remain open.
+Section-header search supports the selected conversation or all conversations the caller can access. In the latter mode, show the conversation identity/path on each section result and open that conversation before navigating to its section. Inline-reference autocomplete remains limited to the current conversation, while hashtag identities are global and shared across conversations. Hashtag-name search separately supports cross-conversation scope. Provide distinct intents for header lookup, content search within a section, and finding messages referencing a section. Resolve ambiguous headers to section IDs. Header matching is confirmed as case-insensitive substring: auth matches Authentication and OAuth notes. Keep hashtag name search case-sensitive, using substrings. Whether section-content search includes descendants and the exact ranking/pagination rules remain open. PostgreSQL now has a trigram header index, but no search route is implemented yet.
 
 Reference search uses sections matching the queried name plus their referencing messages; old display labels may differ after a declined rename update. Historical-label text search is a different query. Results should identify target section and source message and support navigation/ancestor expansion. No implemented route or response exists for these searches.
+
+Confirmed reverse-lookup flow: first show matching section headers, then let the user choose a section ID. Retrieve the messages referencing that selected ID rather than treating every matching header as one target. The section ID is globally unique, so the database lookup is driven by referenced_section_id and its target-first index; the stored conversation scope remains enforced by foreign keys. The future API must still authorize access to that section's conversation. Identical headers remain distinct choices, and messages are presented/paginated by sequence rather than UUID index order.
 
 ### 14.2 Hashtags
 
 During composition/rendering recognize hashtags according to the eventual parser rules. Preserve spelling/case; do not lowercase, stem, or merge #Go and #go. Same exact literal in one conversation reuses one hashtag identity; another conversation has its own identity.
 
-**Clicking a hashtag does nothing.** Do not attach section-like navigation or click-to-search behavior. To find tagged messages, the user explicitly searches the exact hashtag string within the current conversation. Messages need not be consecutive. Show normal paginated message results and navigate from results by message ID/sequence. Repeated occurrences of one hashtag in one message produce one association and one matching message, not duplicate search results. Backend tag lookup/search/mutation APIs, token syntax, escaping/code behavior, and response fields are pending. Do not send unsupported hashtag arrays and assume association rows are created today.
+**Clicking a hashtag does nothing.** Do not attach section-like navigation or click-to-search behavior. To find tagged messages, the user explicitly searches hashtag names within the current conversation or across conversations they can access. Reuse one hashtag ID for the same exact string across conversations and show conversation context on cross-conversation message results. Name search uses case-sensitive substrings: back matches #backend but not #Backend. Treat search input literally, including wildcard characters. The schema includes a trigram GIN name index; search APIs are not implemented. Messages need not be consecutive. Show normal paginated message results and navigate from results by message ID/sequence. Repeated occurrences of one hashtag in one message produce one association and one matching message, not duplicate search results. Backend tag lookup/search/mutation APIs, token syntax, escaping/code behavior, and response fields are pending. Do not send unsupported hashtag arrays and assume association rows are created today.
 
 ### 14.3 Reply and Flat Descendant Thread
 
@@ -646,6 +652,25 @@ Confirmed future Markdown scenarios, executable only once their contracts exist:
 
 ## 17. Change History
 
+### 2026-10-24 — Selected-Section Reverse Lookup
+
+- Recorded header search followed by explicit selection and reference lookup by the selected section ID. Updated the backend index without changing conversation permissions or implementing a new API.
+
+### 2026-10-24 — Historical Sibling Rendering Example
+
+- Recorded sequence-based A/C/B rendering with inclusive-range gaps and preserved parent-level messages, independent of heading creation times. No current wire contract changed.
+
+### 2026-10-24 — Case-Insensitive Header Substring Matching Confirmed
+
+- Recorded auth matching Authentication and OAuth notes for both section-header search scopes, without changing exact hashtag identity or same-conversation reference targets.
+- Database indexing is in place; API routes, result schemas, and search pagination remain pending.
+
+
+### 2026-10-24 — Cross-Conversation Section-Header Discovery
+
+- Recorded same-conversation and cross-accessible-conversation header-search modes, including conversation context in results and navigation to the target conversation/section.
+- Kept inline-reference autocomplete and hashtag identity/search conversation-scoped. Matching and API contracts remain pending; no new endpoint is implemented.
+
 ### 2026-10-24 — Scoped Feature Metadata Schema
 
 - Recorded conversation-scoped message foreign keys for pins, previews, reactions, locations, and edit history. These remain schema-only capabilities; no current API contract changed.
@@ -681,3 +706,22 @@ Confirmed future Markdown scenarios, executable only once their contracts exist:
 - Recorded confirmed Markdown flows and separated pending API/schema decisions from callable interfaces.
 - Confirmed standard Markdown inline-link ordering and the rename prompt controlling persistent updates to older reference labels.
 - Included a reusable context summary, capability checklist, and acceptance scenarios. No frontend or backend implementation was performed.
+
+### 2026-10-24 — Recommended WebSocket Operation Dispatch
+
+- Recommend reusing one WebSocket connection per connected client/device for all operation types, using `type` to dispatch operation-specific payloads and `conversation_id` to identify scope.
+- Distinguish client commands (for example `message.edit`) from committed server events (`message.updated`). A proposed `request_id` correlates success/errors with pending UI actions; it is separate from message IDs and message sequences.
+- Current incoming dispatch handles `message` and `read_receipt`. Edit/delete/section commands and a consistent typed response envelope are not implemented. Candidate names/payloads require agreement before frontend implementation.
+
+### 2026-10-24 — Cross-Conversation Hashtag Name Search
+
+- Confirmed case-sensitive substring hashtag-name search within one or across accessible conversations; exact conversation-local hashtag identity is unchanged.
+- Added `idx_hashtags_name_trgm` using PostgreSQL GIN and `gin_trgm_ops`; reuse `pg_trgm` and use case-sensitive `LIKE` for matching.
+- Synchronized the initial migration, schema snapshot, backend SQL/DBML, and frontend search flow. No search endpoint is implemented.
+
+### 2026-10-24 — Global Hashtag Identity (Supersedes Conversation-Local Identity)
+
+- The same exact case-sensitive hashtag string now identifies one global hashtag across conversations. Earlier entries describing conversation-local hashtag identity are superseded.
+- Removed hashtags.conversation_id and its scoped uniqueness constraints; added global UNIQUE(name). Associations retain conversation_id, the composite message foreign key, and a simple hashtag_id foreign key.
+- Retained case-sensitive substring search and both hashtag indexes. Search results remain limited to messages the caller can access; sharing a hashtag does not grant access to other conversations.
+- Updated the initial migration, schema snapshot, backend SQL/DBML, and frontend flows. No live database migration or hashtag API was executed or implemented.

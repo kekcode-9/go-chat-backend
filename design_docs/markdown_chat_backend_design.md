@@ -32,7 +32,7 @@ The project is a Go chat backend using PostgreSQL 17, Redis Pub/Sub, JWT authent
 
 The user wants conversations to support a Markdown-like section hierarchy, rather than merely Markdown-formatted message bodies. Consecutive messages can form named sections; sections can nest, collapse, be searched, and be referenced from messages using `[[section_header]]`. Headers may repeat, but section IDs must be unique. Users should be able to create a section before discussing a topic or group historical consecutive messages. The requested UI includes a plus action for adding text to a group and dragging a boundary to include existing messages. Not all messages need to belong to a section.
 
-Messages can also mention any number of hashtags. Hashtags are case- and spelling-sensitive, scoped to one conversation, and identify messages for search rather than contiguous groups. The same exact hashtag name in one conversation refers to one hashtag identity; the same name in another conversation is independent. Replies remain independent messages in the chronological conversation and also appear in a collapsible thread attached to the message being replied to. They do not inherit the target message's section membership.
+Messages can also mention any number of hashtags. Hashtag identities are global and case- and spelling-sensitive. Name searches can span conversations the caller can access. Hashtags identify messages for search rather than contiguous groups. The same exact hashtag name reuses one hashtag ID across all conversations. Replies remain independent messages in the chronological conversation and also appear in a collapsible thread attached to the message being replied to. They do not inherit the target message's section membership.
 
 The user is concerned about the growth rate of the messages table and preserving one message row per unique conversation sequence number. Association rows must live in separate tables: they must never duplicate messages or consume message sequence numbers. The user's proposed structure is a sections table with conversation ID and start/end message sequence numbers, a separate `section_references` table linking messages to sections, and analogous tables for hashtags. The user has explicitly accepted omitting the earlier proposed `has_section_references` boolean. The latest inline-reference proposal stores the selected target ID and display label together in message content, with derived reference rows for lookup, as described below and in section 6.4.
 
@@ -62,11 +62,11 @@ The user subsequently asked whether a collaborative-document model using CRDTs, 
 
 After these assessments, the user clarified that the primary motivation for the file approach was drastically reducing database rows and tables and concluded that the approach appears to introduce more challenges than benefits. Treat file-first replacement as set aside for now. This does not approve CRDT adoption, generated snapshots, Elasticsearch, or any other replacement architecture. Continue refining the existing relational Markdown-chat design, keeping schema size and association storage proportional to actual requirements; fewer rows alone is not a demonstrated performance improvement.
 
-The user has now explicitly scrapped the file-based conversation idea and returned to planning the relational database modifications. The agreed working inventory is four new tables: `sections`, `section_references`, `hashtags`, and `message_hashtags`. Their conversation IDs keep structure, mentions, and hashtag identity scoped to the conversation; columns and SQL constraints are now defined in the consolidated initial migration. A section also needs its header. The user confirmed nullable `start_sequence_no` and `end_sequence_no`, both null for an empty section, with `created_at` preserving section creation chronology. All four new tables must include both `created_at` and `updated_at`. An older empty section cannot receive a new tail message after a later section has begun: for A = 10–20, B = empty, C = 21–30, in creation order, new message 31 cannot be assigned to B. Existing `messages.reply_to_message_id` supports reply relationships without requiring a new threads table. The user has now explicitly authorized defining these schemas in the existing initial migration. Section 9.6 records the inventory; service/API behavior still needs implementation.
+The user has now explicitly scrapped the file-based conversation idea and returned to planning the relational database modifications. The agreed working inventory is four new tables: `sections`, `section_references`, `hashtags`, and `message_hashtags`. Sections and section references retain conversation scope; hashtags have global identity, while message_hashtags records the associated message's conversation; columns and SQL constraints are now defined in the consolidated initial migration. A section also needs its header. The user confirmed nullable `start_sequence_no` and `end_sequence_no`, both null for an empty section, with `created_at` preserving section creation chronology. All four new tables must include both `created_at` and `updated_at`. An older empty section cannot receive a new tail message after a later section has begun: for A = 10–20, B = empty, C = 21–30, in creation order, new message 31 cannot be assigned to B. Existing `messages.reply_to_message_id` supports reply relationships without requiring a new threads table. The user has now explicitly authorized defining these schemas in the existing initial migration. Section 9.6 records the inventory; service/API behavior still needs implementation.
 
 The user confirmed self-contained inline links with standard Markdown ordering: type `[[parent section#child section header]]`, select a matching section, then send/store `[Parent section#child section header](referenced-section-id)` in `messages.content`. This supersedes the initial reversed `(label)[id]` example. The exact target convention/escaping still needs specification. The backend derives `section_references` from these links for reverse lookup and finding messages mentioning a searched section. Renderers resolve each occurrence from its embedded ID without fetching association rows to pair labels with IDs. Reference rows are derived search relationships, not a second independently editable source for inline positions. On section rename the frontend asks whether to update reference labels in the user's older messages: yes updates persisted message content; no preserves old labels and unchanged target IDs. Working author scope is the acting user's own messages; broadening that scope has not been authorized. One association per distinct message/section pair is now confirmed. Customized-label handling, parent-path propagation, and the bulk-update API/transaction contract remain open.
 
-The user has also confirmed one `message_hashtags` row per distinct message/hashtag pair even when that literal repeats in the message. Hashtags have no click action; users find tagged messages by explicitly searching the exact hashtag string. Parent and child sections may have identical boundaries. Creation of overlapping sections is rejected; valid ancestor/descendant containment, including equal ranges, remains permitted. These decisions do not alter the established automatic adjustment behavior for explicit boundary transfers.
+The user has also confirmed one `message_hashtags` row per distinct message/hashtag pair even when that literal repeats in the message. Hashtags have no click action; users find tagged messages through explicit case-sensitive substring name search within or across accessible conversations. Parent and child sections may have identical boundaries. Creation of overlapping sections is rejected; valid ancestor/descendant containment, including equal ranges, remains permitted. These decisions do not alter the established automatic adjustment behavior for explicit boundary transfers.
 
 During physical database planning, the user confirmed that nonempty sections are placed by message ranges even when historical grouping happens later; `created_at` records creation order and does not make a newly grouped old range the conversation tail. Deleting a section removes its heading, promotes its direct children to its former parent/root, and preserves messages; old Markdown links remain visibly unavailable. Section 9.7 contains the consolidated physical schema, indexes, foreign-key behavior, and service/SQL responsibility split. The schema is now implemented in the initial migration by explicit user request. This supersedes the earlier candidate-only status; pending service policies are not claimed to be implemented.
 
@@ -74,7 +74,15 @@ The initial migration has been rewritten at the user's explicit request to defin
 
 Conversation-scoped feature rows: `message_pins`, `link_previews`, `message_reactions`, `live_locations`, and `message_edit_history` now each have a required `conversation_id` and composite `(conversation_id, message_id)` foreign key to `messages(conversation_id, id)`. This replaces their old message-ID-only foreign keys and prevents attaching a message from another conversation. No API or delete policy changed; schema.sql, the initial migration, full SQL, and DBML stay synchronized.
 
+Section-header search is now confirmed as case-insensitive substring matching within one or across accessible conversations. The migration and schema snapshot include pg_trgm and a GIN index on sections.header. The search API itself remains pending; section-reference autocomplete/link identity remains conversation-scoped, while hashtag identity is global. No conversation/header/ID B-tree is added because the selected workload is substring matching, not exact-name lookup.
+
+The operation catalogue in section 9.8 records message creation/edit/deletion, replies, reactions, section lifecycle/boundaries, and global hashtag creation/mention editing, plus additional read/navigation/pin flows. Repeated mentions retain their association until their final occurrence is removed. Removing a hashtag's final message association retains its dictionary row. Hashtag mention edits must preserve an old name while any references remain globally, reuse an existing replacement identity, and may rename an unused old identity only when the replacement name does not already exist. Detailed deletion behavior and an optional unused-ID reuse policy still require service contracts. The catalogue does not implement APIs or approve optional split/merge/global-administration features.
+
 ## 3. Existing Backend Baseline
+
+Reverse-reference lookup: the user searches section headers, selects a uniquely identified section, and retrieves messages linking to that ID. The supporting index is (referenced_section_id, message_id), without a leading conversation column. Keep section_references.conversation_id and its composite foreign keys for integrity; index order does not alter scope. Source messages necessarily share the selected section's conversation, while future APIs must still authorize that conversation. Message display/pagination order uses messages.sequence_no, not the UUID order of this lookup index.
+
+Index simplification: the speculative (conversation_id, parent_section_id, created_at, id) index was removed because frequent creation-ordered immediate-child queries have not been established. The existing unique (conversation_id, id) index already narrows section retrieval to one conversation. Keep boundary lookup and trigram header-search indexes; do not reintroduce the removed ordering index without an actual workload justification.
 
 ### 3.1 Organization and Message Flow
 
@@ -146,7 +154,7 @@ The conversation repository now supplies participant status and nullable last-re
 11. Users can search section headers and search message content within a section.
 12. A message can reference multiple sections through `[[...]]` syntax.
 13. Clicking a reference navigates to its target section.
-14. Section structure, resolution, and search stay within the owning conversation.
+14. Section identity, structure, and inline reference targets remain conversation-scoped. Header search can run within one conversation or across conversations the caller is allowed to access; the latter scope was explicitly clarified by the user during index discussion.
 15. The plus action is unavailable when a section has ended and another section has begun immediately after it. Backend mutations must enforce the corresponding boundary rules rather than relying on frontend visibility.
 16. Plus buttons and dragging are future frontend controls. The current design must accommodate the backend operations that those controls will invoke, without implementing the controls themselves.
 17. Empty sections are allowed, both before receiving any messages and after a boundary transfer removes their last message. Emptiness alone must not delete the section.
@@ -159,10 +167,10 @@ The conversation repository now supplies participant status and nullable last-re
 
 1. A message can contain any number of hashtags.
 2. Hashtag membership does not require consecutive messages.
-3. Search returns messages mentioning the requested hashtag in the same conversation.
+3. Search returns messages mentioning matching hashtags within one conversation or across conversations the caller can access. Name discovery uses case-sensitive substrings.
 4. Exact spelling and case define identity: `#Go`, `#go`, and `#GO` differ.
-5. An exact hashtag name is unique within a conversation; repeated mentions reuse that hashtag's identity.
-6. Another conversation may independently contain a hashtag with the same name.
+5. An exact hashtag name is globally unique; repeated mentions across any conversations reuse that hashtag's identity.
+6. Message associations retain conversation_id and enforce that the associated message belongs to that conversation. The global hashtag itself has no conversation_id.
 
 ### 4.3 Replies
 
@@ -201,6 +209,8 @@ In this model, membership is derived from boundaries rather than creating refere
 ### 5.2 Confirmed Consecutiveness and Boundary Operations
 
 Section ranges follow chronological `sequence_no`, not UUID ordering or message creation timestamps. A plus action does not insert a message out of chronological order, and a drag action does not renumber messages.
+
+Sibling-order illustration: A created Monday 12:30 covers 10–20; B created Monday 16:00 covers 48–100; C created Monday 20:10 covers 30–42. Render the nonempty siblings as A (10–20), parent-level messages 21–29, C (30–42), parent-level messages 43–47, then B (48–100). Creation time does not relabel sections, move message boundaries, or make B precede C. Endpoints are inclusive, so the gap after 42 starts at 43. Gap messages remain directly within the common parent; they are outside these child sections, not necessarily outside every section. Fetch siblings by parent and order nonempty ranges by start_sequence_no, then merge them with the sequence-ordered timeline. Empty-heading placement remains a separate chronology case. The schema supports this representation; section APIs/rendering are not yet implemented.
 
 For A covering sequences 10–20:
 
@@ -318,12 +328,11 @@ Renaming may affect links in messages outside the currently loaded history page.
 
 ## 7. Hashtag Data Model
 
-The user's conversation-local name uniqueness requirement supports a hashtag dictionary and an association table. The assistant recommended:
+The user's global name uniqueness requirement supports a shared hashtag dictionary and an association table. The assistant recommended:
 
 ```text
 hashtags
 id
-conversation_id
 name
 
 message_hashtags
@@ -335,15 +344,15 @@ hashtag_id
 
 Confirmed uniqueness rules and recommended access paths:
 
-- Unique exact `(conversation_id, name)` on hashtags.
+- Unique exact `name` on hashtags globally.
 - Unique `(message_id, hashtag_id)` on associations, regardless of how many times the literal appears in the message.
-- An index beginning with `hashtag_id` to retrieve associated messages.
-- Conversation checks so an association cannot link a message to another conversation's hashtag.
+- The index `idx_message_hashtags_tag_message (hashtag_id, message_id)` retrieves messages for a known globally unique hashtag ID. A leading `conversation_id` is unnecessary for this lookup. The association's `conversation_id` column and composite message foreign key remain necessary to enforce conversation consistency; authorization still applies to search results.
+- A composite message foreign key enforces the association's conversation; a simple hashtag_id foreign key targets the shared global dictionary.
 - Exact, case-sensitive name matching; no lowercasing or stemming for hashtag identity.
 
-The user has confirmed `hashtags` and `message_hashtags` in the four-table working inventory, explicitly including `conversation_id` on both. The physical schema has not been approved. A dictionary was initially described as optional before the user clarified conversation-local hashtag identity; the dictionary model is now part of the working inventory.
+The four-table inventory retains `hashtags` and `message_hashtags`. The user has superseded the earlier conversation-local hashtag identity decision: `hashtags` no longer contains conversation_id and has globally unique names. `message_hashtags` retains conversation_id and its composite message foreign key. Future services must resolve or create a hashtag by its exact global name, handling concurrent first use via the unique name constraint and reusing the winning ID; lookup must not include conversation_id. No hashtag service is implemented yet.
 
-**Confirmed frontend behavior:** clicking a hashtag does nothing. Hashtags do not navigate like section links and do not initiate search on click. Users explicitly search by the exact hashtag string to retrieve all associated messages within the same conversation. Association rows support set membership, not per-occurrence counts.
+**Confirmed frontend behavior:** clicking a hashtag does nothing. Hashtags do not navigate like section links and do not initiate search on click. Users explicitly search hashtag names within a conversation or across conversations they can access. Name search is confirmed as case-sensitive substring matching: `back` matches `#backend` but not `#Backend`. The migration and schema snapshot include `idx_hashtags_name_trgm`, a GIN index on `hashtags.name` using `gin_trgm_ops`. Queries use `LIKE`, not `ILIKE`, and treat user input as a literal substring by escaping pattern metacharacters. The existing `pg_trgm` extension is reused. The global name unique constraint continues to enforce exact identity independently of partial search. Short patterns without usable trigrams may scan; no minimum search length is imposed. Search routes, request/response contracts, and pagination remain pending. Association rows support set membership, not per-occurrence counts.
 
 Open details include hashtag token syntax, Unicode handling, punctuation, escaped hashtags, code spans/blocks, whether the stored name includes `#`, and whether hashtags can be managed independently from message text. Message editing/deletion must eventually have defined association-update behavior.
 
@@ -378,7 +387,11 @@ Message content can remain text while structural relationships live separately. 
 
 ### 9.3 Candidate Socket Events
 
-The assistant proposed a general event envelope carrying `type`, `conversation_id`, and event `data`, replacing the assumption that every outgoing routed payload is a chat message. The following names are candidates, not a frozen protocol:
+The assistant recommends one WebSocket connection per connected client/device, carrying operations for multiple conversations and distinguished by an application-level `type`. Separate sockets per operation are unnecessary. The existing read pump already dispatches incoming `message` and `read_receipt` types, but edit/delete/section handlers and a consistent outgoing envelope are not implemented. This is a recommendation, not an approved or implemented protocol change.
+
+The proposed general envelope carries `type`, `conversation_id`, and operation-specific `data`. A client command such as `message.edit` requests a change; the server validates it in the relevant service, commits through repositories, and broadcasts a resulting event such as `message.updated`. A `request_id` can correlate commands with structured success/error responses. Message IDs and conversation sequence numbers remain separate from request correlation; editing/deleting a message or changing a section does not allocate a new message sequence number. Exact names, correlation/retry rules, and payloads remain candidates. Existing acknowledgments/errors are not yet consistently serialized as typed JSON.
+
+The following event names are candidates, not a frozen protocol:
 
 | Candidate event | Intended meaning |
 | --- | --- |
@@ -521,7 +534,7 @@ The user has identified these four new tables as the basis for the next database
 | --- | --- | --- |
 | `sections` | Section ID, conversation ID, header, start message sequence, end message sequence, parent section ID | Consecutive nested section structure, including empty sections |
 | `section_references` | Reference ID, conversation ID, source message ID, referenced section ID | Links from messages to selected sections |
-| `hashtags` | Hashtag ID, conversation ID, exact hashtag string | Conversation-local hashtag identity |
+| `hashtags` | Hashtag ID, globally unique exact hashtag string | Global hashtag identity shared across conversations |
 | `message_hashtags` | Association ID, conversation ID, message ID, hashtag ID | Searchable links from messages to hashtags |
 
 The section header was not repeated in the user's latest shorthand inventory but remains an explicit prior requirement. Header text is non-unique; selected references resolve by ID.
@@ -534,7 +547,7 @@ Including `conversation_id` on associations makes scope explicit. The schema pla
 
 Before producing migration SQL, resolve:
 
-- Distinguish already established constraints from remaining behavior choices: same-conversation links, exact conversation-local hashtag identity, stable section IDs with duplicate headers, and paired-null empty boundaries are not new open product questions. Choosing foreign keys/checks/indexes to express them is schema implementation work.
+- Distinguish already established constraints from remaining behavior choices: same-conversation links, exact global hashtag identity, stable section IDs with duplicate headers, and paired-null empty boundaries are not new open product questions. Choosing foreign keys/checks/indexes to express them is schema implementation work.
 - Implement the confirmed association uniqueness rules: one row per message/hashtag pair and one per message/referenced-section pair, independent of occurrence count.
 - Implement confirmed equal-boundary parent/child support and rejection of overlapping section creation outside valid ancestry. Express these constraints without breaking the established automatic propagation during explicit boundary transfers.
 - First-message assignment for an eligible last empty section and last-section eligibility within nested hierarchies or tied creation timestamps.
@@ -573,6 +586,7 @@ This complete schema is defined in `migrations/20260719144919_create_initial_sch
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- =============================================================================
 -- Users
@@ -734,12 +748,12 @@ CREATE TABLE sections (
     CONSTRAINT sections_nonempty_header CHECK (length(btrim(header)) > 0)
 );
 
-CREATE INDEX idx_sections_conversation_parent_created
-    ON sections (conversation_id, parent_section_id, created_at, id);
-
 CREATE INDEX idx_sections_conversation_boundaries
     ON sections (conversation_id, start_sequence_no, end_sequence_no)
     WHERE start_sequence_no IS NOT NULL;
+
+CREATE INDEX idx_sections_header_trgm
+    ON sections USING GIN (header gin_trgm_ops);
 
 CREATE TABLE section_references (
     id UUID PRIMARY KEY,
@@ -758,19 +772,20 @@ CREATE TABLE section_references (
         UNIQUE (message_id, referenced_section_id)
 );
 
-CREATE INDEX idx_section_references_conversation_target_message
-    ON section_references (conversation_id, referenced_section_id, message_id);
+CREATE INDEX idx_section_references_target_message
+    ON section_references (referenced_section_id, message_id);
 
 CREATE TABLE hashtags (
     id UUID PRIMARY KEY,
-    conversation_id UUID NOT NULL REFERENCES conversations(id),
     name TEXT COLLATE "C" NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    CONSTRAINT hashtags_conversation_id_id_key UNIQUE (conversation_id, id),
-    CONSTRAINT hashtags_conversation_name_key UNIQUE (conversation_id, name),
+    CONSTRAINT hashtags_name_key UNIQUE (name),
     CONSTRAINT hashtags_nonempty_name CHECK (length(name) > 0)
 );
+
+CREATE INDEX idx_hashtags_name_trgm
+    ON hashtags USING GIN (name gin_trgm_ops);
 
 CREATE TABLE message_hashtags (
     id UUID PRIMARY KEY,
@@ -783,13 +798,13 @@ CREATE TABLE message_hashtags (
         FOREIGN KEY (conversation_id, message_id)
         REFERENCES messages (conversation_id, id) ON DELETE CASCADE,
     CONSTRAINT message_hashtags_hashtag_fkey
-        FOREIGN KEY (conversation_id, hashtag_id)
-        REFERENCES hashtags (conversation_id, id),
+        FOREIGN KEY (hashtag_id)
+        REFERENCES hashtags (id),
     CONSTRAINT message_hashtags_message_target_key UNIQUE (message_id, hashtag_id)
 );
 
-CREATE INDEX idx_message_hashtags_conversation_tag_message
-    ON message_hashtags (conversation_id, hashtag_id, message_id);
+CREATE INDEX idx_message_hashtags_tag_message
+    ON message_hashtags (hashtag_id, message_id);
 
 CREATE TABLE message_reactions (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -940,17 +955,20 @@ Renaming with opt-in updates must update persisted message labels across the int
 | --- | --- |
 | Existing history pagination | Existing unique conversation/sequence key |
 | Direct replies for recursive descendant traversal | New partial conversation/reply-target/sequence index |
-| All sections in a conversation / children of a section | Conversation/parent/creation/ID index |
+| All sections in a conversation / children of a section | Existing unique conversation/ID index narrows to the conversation; filter parents and sort the result as needed |
 | Sections containing/intersecting a sequence range | Partial conversation/start/end index; final ancestor filtering remains explicit |
 | Resolve section by ID | Primary key, scoped by conversation in repository query |
+| Case-insensitive header substring search, scoped or cross-conversation | GIN header trigram index; authorized conversation filtering remains explicit |
 | Render references for a page, if needed | Message/target unique key |
-| Find messages referencing a section | Conversation/target-section/message index, then sequence-paginated join to messages |
+| Find messages referencing a selected section | Target-section/message index using the globally unique section ID, then sequence-paginated join to messages |
 | Find exact hashtag in a conversation | Conversation/name unique key |
 | Find messages with a hashtag | Conversation/hashtag/message index, then sequence-paginated join to messages |
 
 Fetch message pages before aggregating their associations, or use EXISTS/join patterns that return each message once. Repeated link/tag occurrences must not multiply results. Return relevant IDs/labels in API arrays if needed without duplicating message rows.
 
-Search by header does not require another table. Initial scoped text matching can use the conversation-filtered section set; choose substring/prefix/full-text behavior during API planning before adding pg_trgm or full-text indexes. Likewise, keyword message search need not introduce Elasticsearch or a search table in this schema change.
+**Confirmed search matching:** case-insensitive substring matching for section headers, both within a conversation and across accessible conversations. The initial migration and schema snapshot now enable `pg_trgm` and create `idx_sections_header_trgm USING GIN (header gin_trgm_ops)`. This supports `header ILIKE '%auth%'` for Authentication and OAuth notes without a leading conversation key. Scoped searches add a conversation predicate, using existing conversation-leading indexes where useful; cross-conversation searches apply their authorized-conversation scope in the future API. No redundant conversation/header/ID B-tree is added for this substring workload. Nonunique indexes already allow duplicate headers, and IDs remain stable result identities/tie-breakers. Match user input as a literal substring by escaping LIKE wildcard characters in the eventual query builder. Short patterns with no useful trigrams may still require scans; do not silently introduce a minimum search length. This schema index does not implement the pending search endpoint. [PostgreSQL trigram indexes](https://www.postgresql.org/docs/17/pgtrgm.html)
+
+Cross-conversation section-header search does not change same-conversation inline links or hashtag identity. Its results must include conversation identity so the frontend can open the corresponding conversation and section. Authorization and inactive-member visibility must be specified in its future API; this is not a public global section directory. [PostgreSQL 17 multicolumn indexes](https://www.postgresql.org/docs/17/indexes-multicolumn.html), [trigram search indexes](https://www.postgresql.org/docs/17/pgtrgm.html).
 
 Do not add a cached header/path column to reference rows, a cached count, a threads table, a section-membership join table, or the omitted boolean merely to avoid ordinary indexed queries.
 
@@ -1003,7 +1021,7 @@ The diagram distinguishes four groups:
 
 The initial migration is authoritative and schema.sql now matches it. This diagram represents the fresh-database schema, not a claim that the existing development database was reset or that every table has an API.
 
-The PostgreSQL DDL in section 9.7.3 remains authoritative. Partial-index predicates and the hashtag column's collation are documented as DBML notes rather than executable settings, so exported SQL is not a replacement migration. Hierarchy policy and child promotion remain service responsibilities. Syntax follows the [official DBML reference](https://dbml.dbdiagram.io/docs/).
+The PostgreSQL DDL in section 9.7.3 remains authoritative. Partial-index predicates, the header GIN/trigram operator class, and the hashtag column's collation are documented as DBML notes rather than executable settings, so exported SQL is not a replacement migration. Hierarchy policy and child promotion remain service responsibilities. Syntax follows the [official DBML reference](https://dbml.dbdiagram.io/docs/).
 
 ```dbml
 Project markdown_chat {
@@ -1137,8 +1155,8 @@ Table sections {
 
   indexes {
     (conversation_id, id) [unique, name: 'sections_conversation_id_id_key']
-    (conversation_id, parent_section_id, created_at, id) [name: 'idx_sections_conversation_parent_created']
     (conversation_id, start_sequence_no, end_sequence_no) [name: 'idx_sections_conversation_boundaries', note: 'Partial in PostgreSQL: WHERE start_sequence_no IS NOT NULL']
+    header [name: 'idx_sections_header_trgm', note: 'PostgreSQL GIN (header gin_trgm_ops), requires pg_trgm; supports case-insensitive substring ILIKE']
   }
 
   checks {
@@ -1160,7 +1178,7 @@ Table section_references {
 
   indexes {
     (message_id, referenced_section_id) [unique, name: 'section_references_message_target_key']
-    (conversation_id, referenced_section_id, message_id) [name: 'idx_section_references_conversation_target_message']
+    (referenced_section_id, message_id) [name: 'idx_section_references_target_message']
   }
 
   Note: 'Derived from message content. Repeated links to the same section produce one association. Deleting the target removes associations but preserves original links in message text.'
@@ -1168,14 +1186,13 @@ Table section_references {
 
 Table hashtags {
   id uuid [pk, not null, note: 'UUIDv7 generated in Go']
-  conversation_id uuid [not null]
   name text [not null, note: 'PostgreSQL COLLATE "C"; exact case and spelling; proposed full literal such as #backend']
   created_at timestamptz [not null, default: `clock_timestamp()`]
   updated_at timestamptz [not null, default: `clock_timestamp()`]
 
   indexes {
-    (conversation_id, id) [unique, name: 'hashtags_conversation_id_id_key']
-    (conversation_id, name) [unique, name: 'hashtags_conversation_name_key']
+    name [unique, name: 'hashtags_name_key']
+    name [name: 'idx_hashtags_name_trgm', note: 'PostgreSQL GIN (name gin_trgm_ops); case-sensitive substring search using LIKE within or across accessible conversations']
   }
 
   checks {
@@ -1193,7 +1210,7 @@ Table message_hashtags {
 
   indexes {
     (message_id, hashtag_id) [unique, name: 'message_hashtags_message_target_key']
-    (conversation_id, hashtag_id, message_id) [name: 'idx_message_hashtags_conversation_tag_message']
+    (hashtag_id, message_id) [name: 'idx_message_hashtags_tag_message']
   }
 
   Note: 'One association per message/tag pair, independent of textual occurrence count. Hashtags are searched explicitly and have no click action.'
@@ -1300,10 +1317,9 @@ Ref: section_references.conversation_id > conversations.id [delete: no action]
 Ref section_references_message_fkey: section_references.(conversation_id, message_id) > messages.(conversation_id, id) [delete: cascade]
 Ref section_references_section_fkey: section_references.(conversation_id, referenced_section_id) > sections.(conversation_id, id) [delete: cascade]
 
-Ref: hashtags.conversation_id > conversations.id [delete: no action]
 Ref: message_hashtags.conversation_id > conversations.id [delete: no action]
 Ref message_hashtags_message_fkey: message_hashtags.(conversation_id, message_id) > messages.(conversation_id, id) [delete: cascade]
-Ref message_hashtags_hashtag_fkey: message_hashtags.(conversation_id, hashtag_id) > hashtags.(conversation_id, id) [delete: no action]
+Ref message_hashtags_hashtag_fkey: message_hashtags.hashtag_id > hashtags.id [delete: no action]
 
 Ref: conversation_participants.conversation_id > conversations.id [delete: no action]
 Ref: conversation_participants.user_id > users.id [delete: no action]
@@ -1360,6 +1376,143 @@ TableGroup migration_tool_metadata {
 ```
 
 
+### 9.8 Markdown Operation Catalogue
+
+This catalogue records the user's operation inventory and additional cases needed to cover the existing design. It is a behavioral checklist for subsequent service, repository, API, and event design, not a claim that these operations are implemented. Subcases can occur together: a forwarded reply inside a section may also contain section links and hashtags. They should not require a separate command type for every combination.
+
+#### 9.8.1 Message Creation
+
+1. Create a new message under the conversation root, without extending a section.
+2. Create a message by forwarding another message. This creates its own message ID and destination-conversation sequence, with forwarded source/actor metadata. Forwarding across conversations is possible in the schema; source access, snapshot behavior, and handling embedded source-conversation section links require a service policy.
+3. Create a message explicitly inside a section, subject to consecutive tail eligibility. This includes the first message of an eligible empty section and nested-section boundary propagation. Ordinary sends never implicitly extend a section.
+4. Create a message referencing one or more sections, including repeated occurrences of one target and different selected IDs with identical display headers. Persist one section_references row per distinct message/target pair, derived from canonical content. Targets must belong to the message's conversation.
+5. Create a message mentioning one or more hashtags, including repeated occurrences of one exact name. Resolve exact global hashtag identities and persist one message_hashtags row per distinct message/tag pair. Hashtag name identity is case-sensitive.
+6. Create a reply, optionally combined with forwarding, section targeting, links, or hashtags where allowed. Reply targeting and section targeting are independent.
+
+#### 9.8.2 Message Editing and Association Reconciliation
+
+1. Edit ordinary message text without changing links or hashtags.
+2. Remove one of several references to the same section: retain that message/section association while another occurrence remains.
+3. Remove all references to a section: remove that message/section association, retaining associations to other section IDs.
+4. Remove one of several occurrences of the same hashtag: retain the message/tag association while another occurrence remains.
+5. Remove all occurrences of a hashtag: remove the message/tag association and retain the hashtag dictionary record. A zero-reference hashtag is allowed.
+6. Add new section references or hashtags to an existing message, not only remove them. Resolve new targets and reconcile the association sets in the same transaction as content changes.
+7. Replace a section reference's selected target, including replacement with a different section having the same header: update the association set by ID, not label. Label-only edits preserve the existing target association.
+8. Replace hashtag text according to 9.8.11. Preserve associations to any old literal still present elsewhere in the same message.
+
+Reconciliation uses the distinct target sets before and after the edit. Removing an occurrence does not necessarily remove its association. Keep unchanged association rows where possible. Message edits preserve message ID, sequence, reply target, and section membership unless a separate supported structural operation changes those relationships. Edit-history recording and edit permissions still need a service/API contract.
+
+#### 9.8.3 Message Deletion
+
+Record and plan each case below, including combinations:
+
+1. Delete a message containing section references: decide whether to remove its derived reference rows or retain them with mandatory deleted-message filtering. It must not appear as a normal live message in reference search.
+2. Delete a message containing hashtags: make the analogous association/search decision; do not automatically delete global hashtag dictionary records.
+3. Delete a message at the start or end of a section, including a message that is both boundaries or an endpoint of multiple nested sections.
+4. Delete an interior section message.
+5. Delete a message having a reply thread, including an intermediate reply that itself has descendants. Preserve the distinction between the exact reply target and the flattened descendant view.
+6. Delete a message that has been forwarded elsewhere. Define what surviving forwarded messages display and whether their copied content remains available.
+7. Delete a message having reactions.
+8. Delete a pinned message.
+9. Delete a reply message while its parent and other replies remain.
+10. Delete a message with attachments, link previews, or a live-location record. Define metadata/resource cleanup and any location-update termination separately from row deletion.
+
+The schema provides message-level deleted_at/deleted_by and allows soft deletion; it does not implement the operation. With a retained tombstone row, the message ID and sequence still exist, so boundary/reply/forward foreign keys remain valid. Deleting visible content is not automatically a section boundary transfer or a reason to renumber messages. Whether a section containing only deleted messages remains nonempty by stored range or becomes empty in the product is unresolved. A hard delete has different foreign-key consequences and must not be assumed to cascade replies, forwards, reactions, or pins. Deletion visibility, association cleanup, boundary policy, reaction/pin handling, and reply/forward display remain explicit open decisions rather than inferred behavior.
+
+#### 9.8.4 Reply Creation and Thread Views
+
+Cover the full matrix:
+
+| Reply sequence relative to target | Target placement | Required behavior |
+| --- | --- | --- |
+| Nonconsecutive | Inside a section | Independent timeline message; target section is not inherited |
+| Nonconsecutive | Outside sections | Independent timeline message; may explicitly target an eligible section |
+| Consecutive | Inside a section | Adjacency alone does not confer membership; explicit section intent and valid section-tail adjacency are still required |
+| Consecutive | Outside sections | No automatic grouping; explicit valid section targeting remains possible |
+
+Consecutive to the original message is not necessarily consecutive to the section's end. Preserve reply_to_message_id when replying to a reply. Display all descendants together in a collapsible thread while retaining each reply in its chronological timeline position, even across section boundaries. Fetching/paginating a thread is a separate read operation; collapse/expand is local frontend state unless synchronized preferences are later requested.
+
+#### 9.8.5 Message Reactions
+
+1. Add a reaction to a message.
+2. Remove one's reaction.
+3. Change one's reaction. The existing UNIQUE(message_id, user_id) permits one reaction per user per message; supporting several simultaneous emoji reactions from the same user would require a separate decision and schema change.
+4. Fetch reaction state/counts with messages or through a defined read contract.
+
+Reaction permissions and reactions to deleted messages remain undecided. Schema existence is not an implemented reaction API.
+
+#### 9.8.6 Section Creation
+
+1. Create a fresh empty section, at root or nested under a parent, with both boundaries null.
+2. Group consecutive historical messages into a section, at root or nested under a parent.
+3. Create a child with exactly the same boundaries as its parent; this is allowed.
+4. Reject creation with overlapping sibling/unrelated ranges. Validate parent containment and absence of hierarchy cycles.
+
+Nonempty sibling placement follows message ranges, even when historical grouping happens later. Empty-heading placement and tail eligibility follow the established chronology rules and remaining empty-section algorithm decisions; this catalogue does not introduce a position column.
+
+#### 9.8.7 Section Header Change
+
+1. Rename a section while retaining its stable ID; duplicate headers remain allowed.
+2. Ask whether the user wants reference display labels updated in their older messages.
+3. If declined, preserve existing stored labels and target IDs.
+4. If accepted, update persisted labels by selected target ID across the intended author's historical messages, including unloaded pages and repeated occurrences. Associations remain unchanged when only labels change.
+5. Handle references whose display path includes a renamed ancestor. Exact path propagation, custom-label treatment, bulk-update permissions, and atomicity remain to be specified.
+
+#### 9.8.8 Section Deletion
+
+1. Delete an empty or nonempty section without deleting messages.
+2. Promote its direct children to its former parent or to root; preserve their IDs and ranges.
+3. Remove associations targeting the deleted section through the existing cascade, preserving stored message links so the frontend can display them as unavailable.
+4. Keep references to surviving children resolvable. Deletion does not automatically rewrite their stored path labels.
+5. Reconcile frontend navigation/collapse state when an open or referenced section disappears.
+
+#### 9.8.9 Section Boundary and Membership Updates
+
+1. Extend or shrink either boundary using valid consecutive historical messages.
+2. Transfer an adjacent boundary message between sections without moving its timeline position or changing its sequence.
+3. Include a currently ungrouped adjacent message in a section, or remove an edge message from a section to its parent/root without assigning it to a sibling.
+4. Allow a source section to become empty, setting both boundaries to null and retaining the heading.
+5. Propagate changes affecting other sections: removal adjusts the immediate containing section outward through ancestors; insertion adjusts outermost affected ancestors inward toward the destination.
+6. Handle nested sources/destinations and shared ancestors in one consistent transaction. Reject an invalid final hierarchy or nonconsecutive inclusion.
+7. Distinguish these operations from ordinary message edits/deletion and from message creation explicitly targeting a section.
+
+Moving an interior message out while keeping messages on both sides would break the single consecutive-range model. Splitting a section, merging sections, or changing a section's parent as a standalone action are possible additional product operations, but have not been requested or approved. Record them as optional scope questions; do not silently implement them through a boundary update.
+
+#### 9.8.10 Hashtag Creation
+
+1. First use of a new exact hashtag string creates its global dictionary record and the message association.
+2. Use of an existing string in any conversation reuses the existing hashtag ID.
+3. Repeated occurrences within one message share one association; different messages each have their own association.
+4. Concurrent first uses must converge on the global unique name rather than creating duplicate hashtag identities. A standalone dictionary-management/create endpoint is not required by these behaviors and has not been selected.
+
+#### 9.8.11 Hashtag Editing / Replacing a Mention
+
+The user's rules govern changing a hashtag mention in message content, not a blanket rename of that global hashtag in every conversation. The exact mutation scope should be explicit in the eventual API. For example, replace #backend with #backend_architecture (the supplied example also used #backedn_architecture; exact spelling always matters).
+
+1. Recompute the edited message's distinct hashtag strings. Removing one occurrence while another #backend remains keeps its old association.
+2. If any message still references #backend after the edit, retain the old dictionary name and ID. Count references across all conversations, not just the edited message's conversation.
+3. If the replacement name already exists, use that existing hashtag ID. Do not rename the old record to collide with it. Retain an unused old dictionary row; automatic dictionary cleanup is not required.
+4. If the replacement name does not exist and the old hashtag still has references, create the replacement dictionary record and associate the edited message with it.
+5. If the replacement name does not exist and the old hashtag has no references after the edit, the user permits updating the unused original record's name and reusing its ID. Creating a new replacement record instead remains compatible with retaining unused records; the service must choose and document one policy before implementation. The permission to reuse an unused ID is not a requirement to rewrite global history.
+6. Content changes, association reconciliation, optional unused-record renaming, and unique-name conflict handling must preserve these rules transactionally. No existing message in another conversation is implicitly edited.
+
+An explicit global hashtag rename/merge/delete administration operation is not established by this request. Hashtag records are retained when mention removal leaves them unused.
+
+#### 9.8.12 Additional Read, Navigation, and Lifecycle Operations
+
+These complete the surrounding flows without implying a new endpoint for every item:
+
+- Fetch the conversation's section hierarchy/ranges and fetch paginated content inside a selected section.
+- Search section headers within/across accessible conversations; resolve an inline reference's selected section ID; fetch messages referencing that section.
+- Search global hashtag names using case-sensitive substrings, then fetch messages associated with a known hashtag ID within one or across accessible conversations. Global hashtag identity never grants access to another conversation's messages.
+- Fetch an individual message or the history window needed to navigate to a message, section, or search result. Define behavior for a deleted/unavailable target.
+- Fetch/paginate all descendant replies while preserving exact parent links.
+- Pin/unpin a message and retrieve pins; deletion interaction is covered above. Pins already have schema support but no implemented API.
+- Recover message and section state after reconnect and reconcile committed changes across devices. Unknown operation types and failed commands need defined responses; command/event envelopes and retry/conflict behavior remain pending.
+- Enforce conversation access and applicable history visibility for every mutation/read. Do not change the separately accepted delayed-read-receipt behavior.
+
+Markdown export/import, section splitting/merging/reparenting, message restoration, bulk deletion, and global hashtag administration are optional future scope questions, not newly approved features. Frontend collapse/expand, plus controls, drag controls, autocomplete, and rename prompts drive the operations above; purely local display actions do not inherently need server commands.
+
 ## 10. Unresolved Decisions and Next Discussion
 
 The initial behavior questions and the narrower follow-ups are answered: consecutive ranges, selected reference IDs, independent timeline replies, permitted empty sections, directional automatic boundary propagation, explicit section targeting, and flat views of all reply descendants. Resolve the following before producing an implementation-ready plan:
@@ -1373,13 +1526,52 @@ The initial behavior questions and the narrower follow-ups are answered: consecu
 - Link target encoding/escaping, bulk-label-update scope/contracts for opt-in renames, unknown references, target deletion, and synchronization of derived references on message edits. Message/target pair uniqueness is confirmed.
 - Implement pending service/API behavior on top of the physical schema now defined in section 9.7 and the initial migration.
 - Hashtag syntax and association lifecycle.
-- Search semantics: exact versus partial header matching, content matching, descendant inclusion, reply inclusion, and pagination.
+- Header matching is confirmed as case-insensitive substring. Remaining search details include content matching, descendant/reply inclusion, authorization, result ordering, and pagination.
 - Finalize service mutation/concurrency contracts before implementing their behavior; the consolidated SQL and indexes are already defined.
 - APIs, socket commands/events, multi-device updates, and reconnect recovery.
 - Whether actual Markdown export is required; the user requested representability and Markdown mode, but an export endpoint and serialization format have not been specified.
 - Migration strategy for this feature, compatibility expectations, and focused acceptance tests.
 
 ## 11. Change History
+
+### 2026-10-24 — Markdown Operation Catalogue and Hashtag Editing Rules
+
+- Added section 9.8 with all user-listed operations/subcases and the interaction rules already established by the design.
+- Added missing edit/add/replace cases, reaction removal/change, reply-to-reply/deletion, nested and root boundary transfers, pins, auxiliary message metadata, read/search/navigation, and reconnect reconciliation.
+- Recorded the user's global hashtag mention-edit rules, including retained unused records, reuse of existing replacement names, and permission to rename an unused old identity. Kept policy choices and message deletion outcomes explicitly unresolved.
+- No schema, application code, or API implementation changed.
+
+### 2026-10-24 — Target-First Reverse-Reference Index
+
+- Confirmed the lookup flow: header search, explicit section selection, then source-message lookup by the globally unique selected section ID.
+- Replaced idx_section_references_conversation_target_message with idx_section_references_target_message on (referenced_section_id, message_id) in the initial migration, snapshot, full SQL, and DBML.
+- Kept conversation_id and composite foreign keys unchanged; they enforce conversation consistency independently of index column order. Existing per-message/target uniqueness remains intact.
+
+### 2026-10-24 — Clarified Sibling Rendering with Historical Creation Times
+
+- Added the A = 10–20, B = 48–100, C = 30–42 example: render A, gap 21–29, C, gap 43–47, B regardless of creation order.
+- Kept section identities/boundaries unchanged and clarified that gaps among child sections remain within their shared parent. Recorded this as schema/design support, not an implemented section endpoint.
+
+### 2026-10-24 — Removed Speculative Sibling-Creation Index
+
+- Removed idx_sections_conversation_parent_created from the initial migration, schema snapshot, full SQL, and DBML. Frequent creation-ordered immediate-child queries have not been established by the product flows.
+- The existing unique (conversation_id, id) index still supports retrieving the conversation's sections; parent filtering and display sorting do not require a dedicated index at this stage. Reconsider one only if actual query frequency and measurements justify it.
+- Retained the boundary and header-search indexes and all schema constraints. No feature behavior changed.
+
+### 2026-10-24 — Case-Insensitive Header Substring Search Index
+
+- Confirmed case-insensitive substring header search within and across accessible conversations.
+- Added pg_trgm and the header GIN/trigram index to the initial migration and complete schema snapshot; Down removes the extension after dependent tables are dropped.
+- Updated full SQL, DBML index notes, query guidance, and frontend behavior. A conversation/header/ID B-tree is not added for this selected workload; duplicate headers remain allowed.
+- Search endpoints are still pending; this change supplies the database access path only.
+- Validated both search scopes, mixed case, and duplicate headers on a disposable PostgreSQL database using Goose Up/Down and standalone loading. Diagnostic EXPLAIN with sequential scans disabled confirmed the trigram index can serve the ILIKE predicate; this does not assert that every small-table query will choose it. DBML export and snapshot equality checks passed.
+
+
+### 2026-10-24 — Header Search Scope and Index Shape Discussed
+
+- Recorded the user's requirement to search section headers within conversations and across accessible conversations, without expanding inline-reference or hashtag scope.
+- Recorded the suggested conversation/header/ID index and its scoped-lookup role; clarified duplicate headers and PostgreSQL 17 leading-column behavior.
+- Asked whether matching should be case-insensitive substring, case-insensitive prefix, or exact. Index selection is pending that answer; no migration, snapshot, or DBML index changed yet.
 
 ### 2026-10-24 — Conversation-Scoped Message References on Five Feature Tables
 
@@ -1541,3 +1733,16 @@ The initial behavior questions and the narrower follow-ups are answered: consecu
 - Preserved the three deferred behavior questions and the unresolved ordering tradeoff.
 - Recorded candidate backend/event capabilities without treating them as finalized APIs.
 - No Markdown chat schema or backend implementation was performed as part of creating this document.
+
+### 2026-10-24 — Cross-Conversation Hashtag Name Search
+
+- Confirmed case-sensitive substring hashtag-name search within one or across accessible conversations; exact conversation-local hashtag identity is unchanged.
+- Added `idx_hashtags_name_trgm` using PostgreSQL GIN and `gin_trgm_ops`; reuse `pg_trgm` and use case-sensitive `LIKE` for matching.
+- Synchronized the initial migration, schema snapshot, backend SQL/DBML, and frontend search flow. No search endpoint is implemented.
+
+### 2026-10-24 — Global Hashtag Identity (Supersedes Conversation-Local Identity)
+
+- The same exact case-sensitive hashtag string now identifies one global hashtag across conversations. Earlier entries describing conversation-local hashtag identity are superseded.
+- Removed hashtags.conversation_id and its scoped uniqueness constraints; added global UNIQUE(name). Associations retain conversation_id, the composite message foreign key, and a simple hashtag_id foreign key.
+- Retained case-sensitive substring search and both hashtag indexes. Search results remain limited to messages the caller can access; sharing a hashtag does not grant access to other conversations.
+- Updated the initial migration, schema snapshot, backend SQL/DBML, and frontend flows. No live database migration or hashtag API was executed or implemented.
