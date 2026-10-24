@@ -50,6 +50,12 @@ Start the server:
 go run ./cmd/server
 ```
 
+## Database Schema
+
+`migrations/` defines database changes applied through Goose. `schema.sql` is the complete application schema snapshot after all current migrations are applied, excluding Goose's own migration-tracking table and rollback statements.
+
+Every schema change must update both the relevant migration and `schema.sql`, along with the design documents and DBML when affected. Snapshot synchronization is maintained explicitly; it is not automatic. Running the application does not execute `schema.sql`.
+
 ## Project Structure
 
 ```

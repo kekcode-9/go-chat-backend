@@ -1,14 +1,16 @@
 # Markdown Chat Backend Design
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
-Status: design discussion in progress. Markdown chat functionality has not been implemented.
+Status: all retained table schemas are consolidated in the initial migration and schema.sql. Markdown, deletion, forwarding, and other pending feature APIs remain unimplemented.
 
 ## 1. Purpose and Maintenance
 
 This is the continuing design record for conversation-scoped Markdown chat in this repository. It records product requirements, database and backend proposals, reasoning, unresolved decisions, and the context needed to resume the discussion with another engineer or LLM.
 
 Update this document whenever a decision changes or a new decision is added. Keep the context summary, detailed design, decision status, and change history consistent. Record superseded decisions and their replacements rather than silently losing the reasoning.
+
+Maintain `schema.sql` as the complete current application schema after applying all repository migrations, not a partial design draft or only the latest migration's delta. Every schema change must update the relevant migration, this snapshot, and affected SQL/DBML/design documentation together. Exclude Goose markers, rollback statements, and Goose-managed migration metadata from the snapshot. Synchronization is explicit, not an automated database dump; it describes the latest migration-defined state, which an existing database may not yet have applied.
 
 Distinguish the following statuses throughout the document:
 
@@ -21,6 +23,10 @@ Distinguish the following statuses throughout the document:
 Do not promote a recommendation to an accepted decision just because it appears in this document. Do not implement Markdown chat changes without a request to do so.
 
 ## 2. Context Summary for Resuming Work
+
+Standing schema-maintenance requirement: keep `schema.sql` synchronized with the complete latest migration-defined application schema on every schema change. As of 2026-10-24 it exactly matches the initial migration's Up schema after excluding Goose markers and the placeholder SELECT, including all 19 application tables and their indexes, constraints, defaults, and foreign keys. Do not revert it to a partial or speculative schema reference.
+
+Schema preservation requirement: retain every table except the three explicitly removed by the user: `message_receipts`, `deleted_messages`, and `message_forwards`. The last two are replaced by nullable metadata on `messages`: existing `deleted_at`, plus `deleted_by`, `forwarded_from_message`, and `forwarded_by`. Read receipts remain unchanged. All 19 retained application-table schemas are now defined in `migrations/20260719144919_create_initial_schema.sql`, as explicitly requested, with `schema.sql` mirroring the Up schema. The full DBML includes those 19 tables plus Goose metadata. No other table removal is authorized.
 
 The project is a Go chat backend using PostgreSQL 17, Redis Pub/Sub, JWT authentication, and Gorilla WebSockets. Messages are persisted before being routed through Redis to connected recipient devices, including the sender's other devices. Each message has a globally unique ID and a conversation-local `sequence_no`. Message history uses sequence cursors for pagination and reconnect catch-up.
 
@@ -56,13 +62,17 @@ The user subsequently asked whether a collaborative-document model using CRDTs, 
 
 After these assessments, the user clarified that the primary motivation for the file approach was drastically reducing database rows and tables and concluded that the approach appears to introduce more challenges than benefits. Treat file-first replacement as set aside for now. This does not approve CRDT adoption, generated snapshots, Elasticsearch, or any other replacement architecture. Continue refining the existing relational Markdown-chat design, keeping schema size and association storage proportional to actual requirements; fewer rows alone is not a demonstrated performance improvement.
 
-The user has now explicitly scrapped the file-based conversation idea and returned to planning the relational database modifications. The agreed working inventory is four new tables: `sections`, `section_references`, `hashtags`, and `message_hashtags`. Their conversation IDs keep structure, mentions, and hashtag identity scoped to the conversation; exact columns/constraints remain to be planned. A section also needs its header. The user confirmed nullable `start_sequence_no` and `end_sequence_no`, both null for an empty section, with `created_at` preserving section creation chronology. All four new tables must include both `created_at` and `updated_at`. An older empty section cannot receive a new tail message after a later section has begun: for A = 10–20, B = empty, C = 21–30, in creation order, new message 31 cannot be assigned to B. Existing `messages.reply_to_message_id` supports reply relationships without requiring a new threads table. No database migration has yet been authorized for these Markdown tables; the next task is database design planning. Section 9.6 records the inventory and remaining schema decisions.
+The user has now explicitly scrapped the file-based conversation idea and returned to planning the relational database modifications. The agreed working inventory is four new tables: `sections`, `section_references`, `hashtags`, and `message_hashtags`. Their conversation IDs keep structure, mentions, and hashtag identity scoped to the conversation; columns and SQL constraints are now defined in the consolidated initial migration. A section also needs its header. The user confirmed nullable `start_sequence_no` and `end_sequence_no`, both null for an empty section, with `created_at` preserving section creation chronology. All four new tables must include both `created_at` and `updated_at`. An older empty section cannot receive a new tail message after a later section has begun: for A = 10–20, B = empty, C = 21–30, in creation order, new message 31 cannot be assigned to B. Existing `messages.reply_to_message_id` supports reply relationships without requiring a new threads table. The user has now explicitly authorized defining these schemas in the existing initial migration. Section 9.6 records the inventory; service/API behavior still needs implementation.
 
 The user confirmed self-contained inline links with standard Markdown ordering: type `[[parent section#child section header]]`, select a matching section, then send/store `[Parent section#child section header](referenced-section-id)` in `messages.content`. This supersedes the initial reversed `(label)[id]` example. The exact target convention/escaping still needs specification. The backend derives `section_references` from these links for reverse lookup and finding messages mentioning a searched section. Renderers resolve each occurrence from its embedded ID without fetching association rows to pair labels with IDs. Reference rows are derived search relationships, not a second independently editable source for inline positions. On section rename the frontend asks whether to update reference labels in the user's older messages: yes updates persisted message content; no preserves old labels and unchanged target IDs. Working author scope is the acting user's own messages; broadening that scope has not been authorized. One association per distinct message/section pair is now confirmed. Customized-label handling, parent-path propagation, and the bulk-update API/transaction contract remain open.
 
 The user has also confirmed one `message_hashtags` row per distinct message/hashtag pair even when that literal repeats in the message. Hashtags have no click action; users find tagged messages by explicitly searching the exact hashtag string. Parent and child sections may have identical boundaries. Creation of overlapping sections is rejected; valid ancestor/descendant containment, including equal ranges, remains permitted. These decisions do not alter the established automatic adjustment behavior for explicit boundary transfers.
 
-During physical database planning, the user confirmed that nonempty sections are placed by message ranges even when historical grouping happens later; `created_at` records creation order and does not make a newly grouped old range the conversation tail. Deleting a section removes its heading, promotes its direct children to its former parent/root, and preserves messages; old Markdown links remain visibly unavailable. Section 9.7 now contains a complete proposed physical schema, indexes, foreign-key behavior, service/SQL responsibility split, and migration/validation plan. Candidate DDL was executed successfully against PostgreSQL 17 in an isolated transaction and rolled back. No application schema or migration file has been changed for Markdown chat. Engineering defaults in 9.7 remain a reviewable proposal rather than user-confirmed product requirements.
+During physical database planning, the user confirmed that nonempty sections are placed by message ranges even when historical grouping happens later; `created_at` records creation order and does not make a newly grouped old range the conversation tail. Deleting a section removes its heading, promotes its direct children to its former parent/root, and preserves messages; old Markdown links remain visibly unavailable. Section 9.7 contains the consolidated physical schema, indexes, foreign-key behavior, and service/SQL responsibility split. The schema is now implemented in the initial migration by explicit user request. This supersedes the earlier candidate-only status; pending service policies are not claimed to be implemented.
+
+The initial migration has been rewritten at the user's explicit request to define all 19 retained application tables. An already-applied migration will not automatically rerun on the existing development database; no reset or application-database migration was performed. Message UUIDv7 generation is implemented in `internal/message/repo.go` using `uuid.NewV7()` with explicit insertion and no database UUIDv4 default. Schema support for future features does not mean their endpoints are implemented.
+
+Conversation-scoped feature rows: `message_pins`, `link_previews`, `message_reactions`, `live_locations`, and `message_edit_history` now each have a required `conversation_id` and composite `(conversation_id, message_id)` foreign key to `messages(conversation_id, id)`. This replaces their old message-ID-only foreign keys and prevents attaching a message from another conversation. No API or delete policy changed; schema.sql, the initial migration, full SQL, and DBML stay synchronized.
 
 ## 3. Existing Backend Baseline
 
@@ -90,10 +100,13 @@ Implemented message fields relevant to this design include:
 | `client_message_id` | Client-generated retry/deduplication identifier |
 | `reply_to_message_id` | Nullable reference to another message; complete thread behavior is not implemented |
 | `created_at`, `updated_at`, `deleted_at` | Creation, edit, and soft-deletion fields |
+| `deleted_by` | Nullable user ID recording who deleted the message |
+| `forwarded_from_message` | Nullable original message ID |
+| `forwarded_by` | Nullable user ID recording who forwarded the message |
 
 The active initial migration has `UNIQUE (conversation_id, sequence_no)` and `UNIQUE (sender_id, client_message_id)`. Neither section-reference rows nor hashtag associations may alter these invariants.
 
-The standalone `schema.sql` has a pre-existing difference: its client-message uniqueness constraint does not match the repository's current conflict target. This was observed during UUIDv7 validation and left unchanged as unrelated. Use the migration as the current application baseline when reasoning about this constraint.
+`schema.sql` now mirrors the initial migration, including participant status/removal fields, refresh sessions, per-sender message retry uniqueness, the four Markdown tables, and retained future-feature tables. The earlier standalone/migration differences were reconciled by the user's explicit consolidation request.
 
 ### 3.3 Existing Interfaces and Limitations
 
@@ -528,13 +541,13 @@ Before producing migration SQL, resolve:
 - Exact constraints for paired nullable boundaries and parent containment during automatic multi-section adjustments.
 - Target convention and escaping for the selected standard Markdown link syntax and the bulk-update contract for the confirmed opt-in rename behavior. Embedded target IDs already solve pairing repeated labels with their chosen targets, and association pair uniqueness is confirmed.
 - Deletion behavior and minimal indexes implementing the confirmed uniqueness/search requirements.
-- No reference-existence boolean is included; the user explicitly accepted omission. The physical schema proposal in section 9.7 is ready for review independently of remaining service/API details.
+- No reference-existence boolean is included; the user explicitly accepted omission. The physical schema in section 9.7 is defined in the initial migration independently of pending service/API work.
 
-This is a table inventory and planning record, not authorization to apply schema changes or introduce additional infrastructure.
+The inventory is now represented in the consolidated initial migration at the user's explicit request. This does not implement pending service/API behavior or authorize introducing additional infrastructure.
 
-### 9.7 Proposed Physical Database Design
+### 9.7 Physical Database Design
 
-**Status: complete schema proposal for review, not an applied migration.** The behavior decisions below are confirmed; specific SQL names, indexes, and implementation defaults are engineering recommendations. This design retains PostgreSQL 17 and the existing separation of service policy, repository SQL, and module-local domain errors. No new storage system, extension, closure table, message-membership table, or thread table is required.
+**Status: consolidated into the existing initial migration by explicit user instruction.** The SQL below mirrors the full Up schema. The feature APIs and service operations remain pending. PostgreSQL 17 and the existing service/repository/error separation are retained.
 
 #### 9.7.1 Newly Confirmed Decisions
 
@@ -554,23 +567,137 @@ These clarify the earlier wording about creation chronology: `created_at` remain
 - Headers are nonblank text and may repeat. Hashtag names are exact text with deterministic `"C"` collation, avoiding case-folded identity. **Recommended literal convention:** store the full literal, such as `#backend`, without trimming/lowercasing; the parser contract must consistently produce it. The schema does not enforce a hashtag grammar or arbitrary length limit.
 - The four-table timestamps apply only to these new tables; unrelated old tables are not being redesigned.
 
-#### 9.7.3 Candidate DDL
+#### 9.7.3 Consolidated Initial Schema
 
-This SQL is a design artifact. It assumes the current initial migration baseline and is not a new migration file.
+This complete schema is defined in `migrations/20260719144919_create_initial_schema.sql`; `schema.sql` mirrors it without Goose markers. This supersedes the earlier proposed separate additive migration. Editing the initial migration does not change an existing database where Goose already recorded that version.
 
 ```sql
-ALTER TABLE messages
-    ADD CONSTRAINT messages_conversation_id_id_key UNIQUE (conversation_id, id);
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-ALTER TABLE messages
-    DROP CONSTRAINT messages_reply_to_message_id_fkey,
-    ADD CONSTRAINT messages_reply_to_conversation_message_fkey
+-- =============================================================================
+-- Users
+-- =============================================================================
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_name TEXT NOT NULL,
+    email TEXT UNIQUE,
+    password TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =============================================================================
+-- Conversations
+-- =============================================================================
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    type TEXT NOT NULL DEFAULT 'direct' CHECK (type IN ('direct', 'group')),
+    title TEXT,
+    description TEXT,
+    avatar_url TEXT,
+    created_by UUID NOT NULL REFERENCES users(id),
+    next_sequence_no BIGINT NOT NULL DEFAULT 1
+);
+
+-- =============================================================================
+-- Messages
+-- (created before conversation_participants so the FK on last_read_message_id works)
+-- =============================================================================
+CREATE TABLE messages (
+    id UUID PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sender_id UUID NOT NULL REFERENCES users(id),
+    conversation_id UUID NOT NULL REFERENCES conversations(id),
+    content TEXT NOT NULL,
+    deleted_at TIMESTAMPTZ,
+    deleted_by UUID REFERENCES users(id),
+    updated_at TIMESTAMPTZ,
+    reply_to_message_id UUID,
+    forwarded_from_message UUID REFERENCES messages(id),
+    forwarded_by UUID REFERENCES users(id),
+    sequence_no BIGINT NOT NULL DEFAULT 1,
+    client_message_id UUID,
+    UNIQUE (conversation_id, sequence_no),
+    UNIQUE (sender_id, client_message_id),
+    CONSTRAINT messages_conversation_id_id_key UNIQUE (conversation_id, id),
+    CONSTRAINT messages_reply_to_conversation_message_fkey
         FOREIGN KEY (conversation_id, reply_to_message_id)
-        REFERENCES messages (conversation_id, id);
+        REFERENCES messages (conversation_id, id)
+);
+
+CREATE INDEX idx_messages_conversation_sequence ON messages (conversation_id, sequence_no);
+
+CREATE INDEX idx_messages_sender ON messages (sender_id);
 
 CREATE INDEX idx_messages_conversation_reply_sequence
     ON messages (conversation_id, reply_to_message_id, sequence_no)
     WHERE reply_to_message_id IS NOT NULL;
+
+-- =============================================================================
+-- Conversation Participants
+-- =============================================================================
+
+CREATE TABLE conversation_participants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'left', 'removed')),
+    conversation_id UUID NOT NULL REFERENCES conversations(id),
+    user_id UUID NOT NULL REFERENCES users(id),
+    left_at TIMESTAMPTZ,
+    removed_at TIMESTAMPTZ,
+    removed_by UUID REFERENCES users(id),
+    is_muted BOOLEAN NOT NULL DEFAULT FALSE,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    last_read_message_id UUID REFERENCES messages(id),
+    last_read_mssg_seq BIGINT,
+    UNIQUE (conversation_id, user_id)
+);
+
+CREATE INDEX idx_conv_participants_user ON conversation_participants (user_id);
+
+-- =============================================================================
+-- Devices
+-- =============================================================================
+CREATE TABLE devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    device_name TEXT NOT NULL,
+    device_type TEXT NOT NULL,
+    public_key TEXT,
+    last_seen_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_devices_user ON devices (user_id);
+
+-- =============================================================================
+-- Refresh_sessions
+-- =============================================================================
+CREATE TABLE refresh_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    device_id UUID NOT NULL REFERENCES devices(id),
+    session_id UUID NOT NULL,
+    refresh_token_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =============================================================================
+-- Blocked Users
+-- =============================================================================
+CREATE TABLE blocked_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    blocker_id UUID NOT NULL REFERENCES users(id),
+    blocked_id UUID NOT NULL REFERENCES users(id),
+    UNIQUE (blocker_id, blocked_id)
+);
 
 CREATE TABLE sections (
     id UUID PRIMARY KEY,
@@ -663,6 +790,93 @@ CREATE TABLE message_hashtags (
 
 CREATE INDEX idx_message_hashtags_conversation_tag_message
     ON message_hashtags (conversation_id, hashtag_id, message_id);
+
+CREATE TABLE message_reactions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    conversation_id UUID NOT NULL,
+    message_id  UUID NOT NULL,
+    user_id     UUID NOT NULL REFERENCES users(id),
+    reaction    TEXT NOT NULL,
+
+    UNIQUE (message_id, user_id),
+    CONSTRAINT message_reactions_conversation_message_fkey
+        FOREIGN KEY (conversation_id, message_id)
+        REFERENCES messages (conversation_id, id)
+);
+
+CREATE TABLE message_attachments (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    message_id    UUID NOT NULL REFERENCES messages(id),
+    type          TEXT NOT NULL,
+    storage_key   TEXT NOT NULL,
+    mime_type     TEXT NOT NULL,
+    size          BIGINT NOT NULL,
+    thumbnail_key TEXT,
+    metadata      JSONB
+);
+
+CREATE TABLE live_locations (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL,
+    message_id  UUID NOT NULL,
+    latitude    DOUBLE PRECISION NOT NULL,
+    longitude   DOUBLE PRECISION NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    CONSTRAINT live_locations_conversation_message_fkey
+        FOREIGN KEY (conversation_id, message_id)
+        REFERENCES messages (conversation_id, id)
+);
+
+CREATE TABLE link_previews (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL,
+    message_id  UUID NOT NULL,
+    url         TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    description TEXT,
+    image_url   TEXT,
+    CONSTRAINT link_previews_conversation_message_fkey
+        FOREIGN KEY (conversation_id, message_id)
+        REFERENCES messages (conversation_id, id)
+);
+
+CREATE TABLE message_pins (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL,
+    message_id  UUID NOT NULL,
+    user_id     UUID NOT NULL REFERENCES users(id),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT message_pins_conversation_message_fkey
+        FOREIGN KEY (conversation_id, message_id)
+        REFERENCES messages (conversation_id, id)
+);
+
+CREATE TABLE message_edit_history (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL,
+    message_id  UUID NOT NULL,
+    old_content TEXT NOT NULL,
+    edited_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT message_edit_history_conversation_message_fkey
+        FOREIGN KEY (conversation_id, message_id)
+        REFERENCES messages (conversation_id, id)
+);
+
+CREATE TABLE group_settings (
+    conversation_id       UUID PRIMARY KEY REFERENCES conversations(id),
+    only_admin_can_post   BOOLEAN NOT NULL DEFAULT FALSE,
+    only_admin_can_add    BOOLEAN NOT NULL DEFAULT FALSE,
+    disappearing_messages  BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE device_push_tokens (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id   UUID NOT NULL REFERENCES devices(id),
+    provider    TEXT NOT NULL,
+    token       TEXT NOT NULL
+);
 ```
 
 The migration's existing `UNIQUE (conversation_id, sequence_no)` supports boundary foreign keys. The additional `UNIQUE (conversation_id, id)` keys support composite foreign keys that enforce same-conversation relationships in PostgreSQL. They do add indexes; they are deliberate integrity costs, not additional message rows. Do not add duplicate indexes for primary keys or unique constraints. PostgreSQL requires a referenced foreign-key column set to have a suitable unique key. [PostgreSQL 17 constraints](https://www.postgresql.org/docs/17/ddl-constraints.html)
@@ -674,7 +888,7 @@ The paired-boundary check explicitly tests both fields for non-null before compa
 - Unique identities, required columns, nonblank section headers, and nonempty hashtag names.
 - Both boundaries null, or both non-null with positive start and inclusive end greater than or equal to start.
 - Existing start/end messages in the section's conversation. Null endpoints skip the corresponding foreign-key match, as required for empty sections.
-- Parent section, referenced section, referenced hashtag, source message, and reply target belong to the same conversation as their owning row.
+- Parent section, referenced section, referenced hashtag, source message, reply target, and message-linked rows in message_pins/link_previews/message_reactions/live_locations/message_edit_history belong to the same conversation as their owning row.
 - A section cannot directly parent itself; longer ancestry cycles require service validation.
 - Exact hashtag identity unique within the conversation.
 - One reference association per message/target-section pair, and one hashtag association per message/tag pair.
@@ -742,17 +956,23 @@ Do not add a cached header/path column to reference rows, a cached count, a thre
 
 #### 9.7.8 Changes to Existing Tables and Migration Shape
 
-The only proposed existing-table schema changes are:
+The existing messages table has these schema changes:
 
 1. Add the scoped message identity unique key needed by the new composite foreign keys.
 2. Replace the old reply-target foreign key with a same-conversation composite foreign key, preserving the exact reply target and existing non-cascading delete behavior.
 3. Add the partial reply lookup index.
+4. Retain existing nullable `deleted_at TIMESTAMPTZ` and add nullable `deleted_by UUID REFERENCES users(id)`.
+5. Add nullable `forwarded_from_message UUID REFERENCES messages(id)` and `forwarded_by UUID REFERENCES users(id)`.
+
+Forwarding provenance is not restricted to the destination conversation by the schema; the original message can be from another conversation. No paired-null metadata constraint is added. This is schema support only: forwarding/deletion request handling and permissions remain pending. The former per-user hiding design in deleted_messages is replaced by message-level deletion metadata, not retained alongside it.
+
+In addition, `message_pins`, `link_previews`, `message_reactions`, `live_locations`, and `message_edit_history` record `conversation_id UUID NOT NULL`. Each replaces its message-only foreign key with a named `(conversation_id, message_id)` reference to `messages(conversation_id, id)`, preserving the existing non-cascading delete behavior. The composite link already proves that the conversation exists through the referenced message; a redundant standalone conversation foreign key is not needed. Existing primary keys, defaults, reaction uniqueness, and other fields remain unchanged. No additional indexes or lifecycle features are introduced by this scoped-FK change.
 
 No message content column conversion, per-message section column, sequence renumbering, access-policy change, or read-receipt restriction is required.
 
-For a later authorized implementation, use one new Goose migration: alter messages, create sections, section_references, hashtags, and message_hashtags, then supporting indexes. Down drops associations before target dictionaries/sections, drops the new reply index/foreign key, restores the original reply foreign key, and removes the new scoped identity key after its dependents are gone. Keep `schema.sql` synchronized for these changes only; its existing unrelated differences are not authorization for a wholesale schema rewrite. Inspect any existing cross-conversation reply data before replacing the reply constraint rather than silently repairing it.
+The user explicitly required every retained schema in the existing initial migration. Up now creates all 19 application tables; Down removes them in reverse dependency order. The standalone schema mirrors Up. No separate migration, receipts table, deleted_messages table, or message_forwards table is introduced.
 
-The application is not in production and a fresh database remains possible, but this design does not authorize a reset or rewriting existing migrations.
+An edited initial migration is used on fresh databases. Goose does not rerun an already-recorded version on the development database; do not reset it without a separate request. Validation uses disposable databases for actual Up/Down and standalone loading. This explicit authorization supersedes the earlier recommendation to create a separate Markdown migration.
 
 #### 9.7.9 Validation Plan
 
@@ -772,14 +992,23 @@ Only the first group of static database rules is enforceable by the DDL itself. 
 
 #### 9.7.10 DBML Diagram
 
-Copy the following block into a DBML-compatible diagram tool such as dbdiagram.io. It includes the four proposed tables and the existing users, conversations, and messages tables needed to show their relationships; unrelated authentication/device tables are omitted. Composite references preserve the proposed same-conversation foreign keys.
+Copy this block into a DBML-compatible diagram tool such as dbdiagram.io. All 19 retained application tables from the consolidated initial migration are included, plus Goose metadata. Only the user-requested receipts/deletions/forwards tables are removed. Deletion/forwarding metadata now lives on messages.
+
+The diagram distinguishes four groups:
+
+- **Core application tables:** users, conversations, messages, conversation_participants, devices, refresh_sessions, and blocked_users, all retained with the documented message modifications.
+- **Markdown schema tables:** sections, section_references, hashtags, and message_hashtags, defined in the initial migration; feature APIs remain pending.
+- **Schema-defined future features:** eight retained tables for reactions, attachments, locations, previews, pins, edit history, group settings, and push tokens, now also created by the initial migration on fresh databases. Schema presence does not implement their APIs.
+- **Migration-tool metadata:** the existing `goose_db_version` table, shown for completeness and managed by Goose rather than application migrations.
+
+The initial migration is authoritative and schema.sql now matches it. This diagram represents the fresh-database schema, not a claim that the existing development database was reset or that every table has an API.
 
 The PostgreSQL DDL in section 9.7.3 remains authoritative. Partial-index predicates and the hashtag column's collation are documented as DBML notes rather than executable settings, so exported SQL is not a replacement migration. Hierarchy policy and child promotion remain service responsibilities. Syntax follows the [official DBML reference](https://dbml.dbdiagram.io/docs/).
 
 ```dbml
 Project markdown_chat {
   database_type: 'PostgreSQL'
-  Note: 'Proposed PostgreSQL 17 schema. Includes four new tables and the three existing tables they depend on. SQL in section 9.7.3 is authoritative for partial indexes and collation.'
+  Note: 'Consolidated initial migration: seven core tables, four Markdown tables, eight retained future-feature tables, and Goose metadata. The receipts/deletions/forwards table designs are intentionally removed; message metadata replaces the latter two.'
 }
 
 Table users {
@@ -812,8 +1041,11 @@ Table messages {
   conversation_id uuid [not null]
   content text [not null, note: 'Canonical Markdown with self-contained section links']
   deleted_at timestamptz
+  deleted_by uuid [note: 'User who deleted the message; nullable']
   updated_at timestamptz
   reply_to_message_id uuid [note: 'Exact immediate reply target; same conversation']
+  forwarded_from_message uuid [note: 'Original message ID; can belong to another conversation']
+  forwarded_by uuid [note: 'User who forwarded the message; nullable']
   sequence_no bigint [not null, default: 1]
   client_message_id uuid
 
@@ -824,6 +1056,71 @@ Table messages {
     (conversation_id, sequence_no) [name: 'idx_messages_conversation_sequence', note: 'Existing redundant index retained by this proposal']
     sender_id [name: 'idx_messages_sender']
     (conversation_id, reply_to_message_id, sequence_no) [name: 'idx_messages_conversation_reply_sequence', note: 'Partial in PostgreSQL: WHERE reply_to_message_id IS NOT NULL']
+  }
+}
+
+Table conversation_participants {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  created_at timestamptz [not null, default: `now()`]
+  role text [not null, default: 'member']
+  status text [not null, default: 'active']
+  conversation_id uuid [not null]
+  user_id uuid [not null]
+  left_at timestamptz
+  removed_at timestamptz
+  removed_by uuid
+  is_muted boolean [not null, default: false]
+  is_archived boolean [not null, default: false]
+  is_pinned boolean [not null, default: false]
+  last_read_message_id uuid
+  last_read_mssg_seq bigint
+
+  indexes {
+    (conversation_id, user_id) [unique]
+    user_id [name: 'idx_conv_participants_user']
+  }
+
+  checks {
+    `role IN ('member', 'admin')`
+    `status IN ('active', 'left', 'removed')`
+  }
+}
+
+Table devices {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  user_id uuid [not null]
+  device_name text [not null]
+  device_type text [not null]
+  public_key text
+  last_seen_at timestamptz [not null]
+  created_at timestamptz [not null, default: `now()`]
+  revoked_at timestamptz
+
+  indexes {
+    user_id [name: 'idx_devices_user']
+  }
+}
+
+Table refresh_sessions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  user_id uuid [not null]
+  device_id uuid [not null]
+  session_id uuid [not null]
+  refresh_token_hash text [not null]
+  expires_at timestamptz [not null]
+  revoked boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  last_used_at timestamptz [not null, default: `now()`]
+}
+
+Table blocked_users {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  created_at timestamptz [not null, default: `now()`]
+  blocker_id uuid [not null]
+  blocked_id uuid [not null]
+
+  indexes {
+    (blocker_id, blocked_id) [unique]
   }
 }
 
@@ -902,8 +1199,94 @@ Table message_hashtags {
   Note: 'One association per message/tag pair, independent of textual occurrence count. Hashtags are searched explicitly and have no click action.'
 }
 
+Table message_reactions {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  created_at timestamptz [not null, default: `now()`]
+  conversation_id uuid [not null]
+  message_id uuid [not null]
+  user_id uuid [not null]
+  reaction text [not null]
+
+  indexes {
+    (message_id, user_id) [unique]
+  }
+}
+
+Table message_attachments {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  created_at timestamptz [not null, default: `now()`]
+  message_id uuid [not null]
+  type text [not null]
+  storage_key text [not null]
+  mime_type text [not null]
+  size bigint [not null]
+  thumbnail_key text
+  metadata jsonb
+}
+
+Table live_locations {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  conversation_id uuid [not null]
+  message_id uuid [not null]
+  latitude "double precision" [not null]
+  longitude "double precision" [not null]
+  expires_at timestamptz [not null]
+}
+
+Table link_previews {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  conversation_id uuid [not null]
+  message_id uuid [not null]
+  url text [not null]
+  title text [not null]
+  description text
+  image_url text
+}
+
+Table message_pins {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  conversation_id uuid [not null]
+  message_id uuid [not null]
+  user_id uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table message_edit_history {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  conversation_id uuid [not null]
+  message_id uuid [not null]
+  old_content text [not null]
+  edited_at timestamptz [not null, default: `now()`]
+}
+
+Table group_settings {
+  conversation_id uuid [pk, not null]
+  only_admin_can_post boolean [not null, default: false]
+  only_admin_can_add boolean [not null, default: false]
+  disappearing_messages boolean [not null, default: false]
+}
+
+Table device_push_tokens {
+  id uuid [pk, not null, default: `gen_random_uuid()`]
+  device_id uuid [not null]
+  provider text [not null]
+  token text [not null]
+}
+
+Table goose_db_version {
+  id integer [pk, not null, increment, note: 'Goose-managed identity column; do not manage in application migrations']
+  version_id bigint [not null]
+  is_applied boolean [not null]
+  tstamp timestamp [not null, default: `now()`]
+
+  Note: 'Existing migration-tool metadata, included for database inventory completeness. Not an application table or Markdown addition.'
+}
+
 Ref: conversations.created_by > users.id [delete: no action]
 Ref: messages.sender_id > users.id [delete: no action]
+Ref: messages.deleted_by > users.id [delete: no action]
+Ref: messages.forwarded_from_message > messages.id [delete: no action]
+Ref: messages.forwarded_by > users.id [delete: no action]
 Ref: messages.conversation_id > conversations.id [delete: no action]
 Ref messages_reply_to_conversation_message_fkey: messages.(conversation_id, reply_to_message_id) > messages.(conversation_id, id) [delete: no action]
 
@@ -921,6 +1304,59 @@ Ref: hashtags.conversation_id > conversations.id [delete: no action]
 Ref: message_hashtags.conversation_id > conversations.id [delete: no action]
 Ref message_hashtags_message_fkey: message_hashtags.(conversation_id, message_id) > messages.(conversation_id, id) [delete: cascade]
 Ref message_hashtags_hashtag_fkey: message_hashtags.(conversation_id, hashtag_id) > hashtags.(conversation_id, id) [delete: no action]
+
+Ref: conversation_participants.conversation_id > conversations.id [delete: no action]
+Ref: conversation_participants.user_id > users.id [delete: no action]
+Ref: conversation_participants.removed_by > users.id [delete: no action]
+Ref: conversation_participants.last_read_message_id > messages.id [delete: no action]
+Ref: devices.user_id > users.id [delete: no action]
+Ref: refresh_sessions.user_id > users.id [delete: no action]
+Ref: refresh_sessions.device_id > devices.id [delete: no action]
+Ref: blocked_users.blocker_id > users.id [delete: no action]
+Ref: blocked_users.blocked_id > users.id [delete: no action]
+
+Ref message_reactions_conversation_message_fkey: message_reactions.(conversation_id, message_id) > messages.(conversation_id, id) [delete: no action]
+Ref: message_reactions.user_id > users.id [delete: no action]
+Ref: message_attachments.message_id > messages.id [delete: no action]
+Ref live_locations_conversation_message_fkey: live_locations.(conversation_id, message_id) > messages.(conversation_id, id) [delete: no action]
+Ref link_previews_conversation_message_fkey: link_previews.(conversation_id, message_id) > messages.(conversation_id, id) [delete: no action]
+Ref message_pins_conversation_message_fkey: message_pins.(conversation_id, message_id) > messages.(conversation_id, id) [delete: no action]
+Ref: message_pins.user_id > users.id [delete: no action]
+Ref message_edit_history_conversation_message_fkey: message_edit_history.(conversation_id, message_id) > messages.(conversation_id, id) [delete: no action]
+Ref: group_settings.conversation_id - conversations.id [delete: no action]
+Ref: device_push_tokens.device_id > devices.id [delete: no action]
+
+TableGroup existing_application_tables {
+  users
+  conversations
+  messages
+  conversation_participants
+  devices
+  refresh_sessions
+  blocked_users
+}
+
+TableGroup markdown_additions {
+  sections
+  section_references
+  hashtags
+  message_hashtags
+}
+
+TableGroup schema_defined_future_features {
+  message_reactions
+  message_attachments
+  live_locations
+  link_previews
+  message_pins
+  message_edit_history
+  group_settings
+  device_push_tokens
+}
+
+TableGroup migration_tool_metadata {
+  goose_db_version
+}
 ```
 
 
@@ -935,15 +1371,55 @@ The initial behavior questions and the narrower follow-ups are answered: consecu
 - Concurrent boundary-edit conflicts, nesting limits, and section deletion/content preservation. Overlapping creation is already confirmed to be rejected; equal-boundary parent/child sections are allowed.
 - Who can create, rename, resize, move, or delete sections in a conversation.
 - Link target encoding/escaping, bulk-label-update scope/contracts for opt-in renames, unknown references, target deletion, and synchronization of derived references on message edits. Message/target pair uniqueness is confirmed.
-- Review the physical schema proposal in section 9.7; its engineering defaults do not implement the remaining service/API behaviors.
+- Implement pending service/API behavior on top of the physical schema now defined in section 9.7 and the initial migration.
 - Hashtag syntax and association lifecycle.
 - Search semantics: exact versus partial header matching, content matching, descendant inclusion, reply inclusion, and pagination.
-- Review/approve the proposed physical SQL and indexes in section 9.7, then finalize service mutation/concurrency contracts before implementing behavior.
+- Finalize service mutation/concurrency contracts before implementing their behavior; the consolidated SQL and indexes are already defined.
 - APIs, socket commands/events, multi-device updates, and reconnect recovery.
 - Whether actual Markdown export is required; the user requested representability and Markdown mode, but an export endpoint and serialization format have not been specified.
 - Migration strategy for this feature, compatibility expectations, and focused acceptance tests.
 
 ## 11. Change History
+
+### 2026-10-24 — Conversation-Scoped Message References on Five Feature Tables
+
+- Added required conversation_id to message_pins, link_previews, message_reactions, live_locations, and message_edit_history, with composite foreign keys to messages(conversation_id, id).
+- Replaced the old message-only references while preserving existing delete behavior, fields, and uniqueness. No API behavior changed.
+- Synchronized the initial migration, complete schema snapshot, SQL excerpt, DBML, and design summaries.
+- Validated Goose Up/Down and standalone schema loading in a disposable database. For all five tables, matching pairs succeeded and cross-conversation, null-conversation, and missing-message inserts were rejected. DBML parsing/export and snapshot equality checks passed.
+
+
+### 2026-10-24 — Complete Schema Snapshot Maintenance Required
+
+- Verified exact equality between schema.sql and the consolidated initial migration's Up schema, excluding Goose markers, rollback SQL, and the placeholder SELECT.
+- Recorded the standing requirement to update the complete snapshot alongside every migration/schema change, with affected design/DBML updates. Clarified that synchronization is explicit and does not imply an existing live database has applied the edited migration.
+- Documented the convention in README.md. No application or database behavior changed.
+
+### 2026-10-24 — Consolidated Schemas and Replaced Deletion/Forwarding Tables
+
+- At the user's explicit request, defined all 19 retained application-table schemas in the initial migration itself and synchronized schema.sql.
+- Removed deleted_messages and message_forwards. Retained messages.deleted_at and added nullable deleted_by, forwarded_from_message, and forwarded_by foreign-key fields.
+- Confirmed existing UUIDv7 generation remains implemented in CreateMessage. No UUIDv4 message default was reintroduced.
+- Updated complete SQL/DBML and frontend/backend context, distinguishing schema support from pending feature APIs. No live application database was reset or migrated.
+- Validated actual Goose Up and Down on a disposable PostgreSQL database, loaded schema.sql after rollback, and verified matching column types/nullability/defaults. The existing CreateMessage path generated/persisted UUIDv7; nullable metadata and foreign keys passed checks. DBML export also passed.
+- Earlier historical table counts and proposed-schema statuses below describe prior stages and are superseded by this consolidation.
+
+
+### 2026-10-24 — Removed Unused Message Receipts Table at User Request
+
+- Removed the unused `message_receipts` definition from schema.sql, the DBML table/relationships/group, and the earlier database-design proposal.
+- Verified the table does not exist in the current live database and is not created by the current migration; no database drop or migration was needed.
+- Kept REST/WebSocket read receipts and participant read-position fields unchanged. All other existing and future-feature tables remain retained.
+- The current diagram now contains 22 tables: 7 existing application tables, 4 Markdown additions, 10 retained future-feature designs, and 1 Goose metadata table. The 23-table count in the preceding historical correction describes the inventory before this explicitly requested removal.
+
+### 2026-10-24 — Corrected Partial DBML to Preserve the Complete Inventory
+
+- Corrected the diagram omission of conversation_participants, devices, refresh_sessions, and blocked_users; none were proposed for deletion and no deletion occurred.
+- Added every additional table already described in schema.sql, marked separately as existing future-feature designs rather than falsely claiming they are deployed.
+- Included Goose-managed migration metadata for completeness. The combined diagram has 23 tables: 7 existing application tables, 4 Markdown additions, 11 existing future-feature designs, and 1 migration-tool table.
+- Recorded the explicit preservation requirement in the context summary and clarified that candidate SQL is an additive delta, not a replacement for the complete schema.
+- Verified table/column coverage against the current migration, standalone schema, and Markdown proposal; validated the complete DBML with the DBML CLI.
+- No migrations, database tables, or application code changed.
 
 ### 2026-10-23 — Added DBML Diagram
 

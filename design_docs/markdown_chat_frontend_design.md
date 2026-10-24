@@ -1,6 +1,6 @@
 # Chat and Markdown Chat Frontend Design
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 Status: living frontend specification. Existing API contracts below are verified against the backend source. Markdown chat behavior is being designed and has not been implemented.
 
@@ -28,6 +28,8 @@ Message IDs are server-generated UUIDv7 strings. Messages have conversation-loca
 
 History requires a participant record. Active participants retain full history access; left/removed participants can read through their current last-read sequence, inclusive. They cannot send new messages. A missing read sequence means empty history. Nonparticipants receive 403. Delayed read receipts after leaving remain valid and can advance subsequent history access. The active conversation list omits inactive conversations, and participant lookup is active-only; the frontend must not assume those endpoints expose historical membership status.
 
+Read receipts use participant read-position fields, not a per-message receipts table. The user requested removing the unused `message_receipts` schema proposal on 2026-10-24; no current endpoint, receipt payload, or frontend flow changed.
+
 Planned Markdown chat has nested, consecutive sequence-range sections; paired-null boundaries for empty sections; and section creation chronology recorded by created_at. Ordinary sends do not extend sections. Section-targeted sends must identify their target, and only valid consecutive extension is allowed. Existing adjacent messages can be assigned through boundary operations with automatic hierarchy adjustment. A prior empty section cannot take a new tail message after a later section begins. These controls are planned frontend behavior, not current request fields.
 
 Typing [[parent#child]] opens same-conversation autocomplete. Selecting a result stores a standard Markdown link [display label](section ID) in the message. The target ID disambiguates repeated headers; derived section-reference rows support reverse lookup/search. The user has confirmed standard link ordering. When a header is renamed, the frontend asks whether to update reference labels in the user's older messages. Yes updates persisted message content; no leaves the old labels while links still target the same IDs. Backend rename/edit/bulk-update APIs are not yet designed. Exact author scope, rename batching/failure handling, and parent-path propagation need final contracts; the working interpretation of "their older messages" is messages authored by the acting user, not permission to rewrite other authors' content.
@@ -36,9 +38,13 @@ Hashtags are exact-case, exact-spelling conversation-local identities, searchabl
 
 Latest confirmed constraints: repeated mentions of the same hashtag or target section in one message create one association per distinct message/target pair. Hashtags have no click action; users explicitly search their exact strings. Parent and child sections may share identical boundaries, but overlapping sibling/unrelated section creation is rejected. These decisions are documented behavior for the future feature, not implemented routes.
 
-Physical-schema planning additionally confirmed that historical nonempty sections appear by message sequence ranges rather than their later creation times. Deleting a heading preserves messages and promotes its direct child headings; links to the deleted section remain visible but unavailable. The optional reference-existence boolean is omitted. The backend document's section 9.7 contains proposed SQL/indexes, validated in a rolled-back PostgreSQL transaction, not an applied migration or available frontend API.
+Physical-schema planning additionally confirmed that historical nonempty sections appear by message sequence ranges rather than their later creation times. Deleting a heading preserves messages and promotes its direct child headings; links to the deleted section remain visible but unavailable. The optional reference-existence boolean is omitted. The backend document's section 9.7 mirrors the consolidated initial migration with all 19 retained application tables. Existing databases do not automatically rerun that edited migration. Schema presence does not make pending Markdown APIs available.
 
 The user requires thorough frontend flows, schemas, responses, and handling for every implemented API, with this document maintained as design evolves. This documentation task does not authorize building frontend screens or implementing unfinished backend features.
+
+Schema update on 2026-10-24: deleted_messages and message_forwards were removed. Messages retain nullable deleted_at and now have nullable deleted_by, forwarded_from_message, and forwarded_by. Current history/socket payloads do not expose these columns and no delete/forward endpoint is implemented; the frontend must not assume sending these fields works. Message IDs remain UUIDv7.
+
+Database scope update: pins, link previews, reactions, live locations, and message edit history now include conversation_id and a composite message reference. Their APIs remain unimplemented; this schema change does not add request fields or new callable operations to the current frontend contract.
 
 ## 3. Application Areas and Client State
 
@@ -639,6 +645,21 @@ Confirmed future Markdown scenarios, executable only once their contracts exist:
 - Historical edits refresh all cached appearances and recover after a missed event once a resync protocol is defined.
 
 ## 17. Change History
+
+### 2026-10-24 — Scoped Feature Metadata Schema
+
+- Recorded conversation-scoped message foreign keys for pins, previews, reactions, locations, and edit history. These remain schema-only capabilities; no current API contract changed.
+
+
+### 2026-10-24 — Consolidated Initial Schema and Message Metadata
+
+- Recorded all retained tables in the initial migration, separately from pending API implementations.
+- Recorded message-level deletion/forwarding columns replacing the two removed tables. Existing wire contracts and read receipts remain unchanged.
+
+
+### 2026-10-24 — Removed Unused Receipts-Table Design
+
+- Recorded removal of the unused per-message receipts-table proposal. Existing REST/WebSocket read receipts and their frontend behavior remain unchanged.
 
 ### 2026-10-23 — Historical Placement and Heading Deletion Confirmed
 

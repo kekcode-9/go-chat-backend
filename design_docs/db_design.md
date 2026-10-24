@@ -1,6 +1,8 @@
 Every table, has to have a `id` column of type `uuid`.
 Every table, has to have a `created_at` column with default timestamp.
 `id` has to be the primary key of every table even if it has any other column or composite columns specified as unique.
+The `message_pins`, `link_previews`, `message_reactions`, `live_locations`, and `message_edit_history` tables each include required `conversation_id` and reference `messages` using `(conversation_id, message_id) -> (conversation_id, id)`. The composite foreign key enforces conversation consistency; existing metadata and delete behavior are retained. See the consolidated initial migration and Markdown backend design for complete schemas.
+
 # `refresh_sessions` table
 ```
 id: uuid
@@ -261,78 +263,9 @@ I would split them into **Tier 2** and **Tier 3**.
 
 ## Tier 2
 
-### 1. message_receipts
+Read receipts use `conversation_participants.last_read_message_id` and `last_read_mssg_seq`. The unused per-message receipts table was removed from the design; no replacement table is proposed.
 
-Notice
-
-Your
-
-```text
-last_read_sequence_no
-```
-
-only tells us
-
-> has user read this?
-
-It does **not** tell us
-
-- sent
-    
-- delivered
-    
-- failed
-    
-
-For WhatsApp-like ticks you'll eventually need
-
-```text
-message_receipts
-
-----------------
-
-id
-
-created_at
-
-message_id
-
-user_id
-
-status
-
-updated_at
-```
-
-Status
-
-```text
-SENT
-
-DELIVERED
-
-READ
-```
-
-Notice
-
-No
-
-```text
-conversation_id
-```
-
-needed.
-
-It comes through
-
-```text
-message
-```
-
----
-
-### 2. message_reactions
+### 1. message_reactions
 
 ```text
 id
@@ -358,37 +291,9 @@ One reaction.
 
 ---
 
-### 3. deleted_messages
+Message deletion uses nullable `messages.deleted_at` and `messages.deleted_by` (user ID); no separate deletion table is retained.
 
-Remember I suggested removing
-
-```text
-is_deleted_for_sender
-```
-
-Instead
-
-```text
-deleted_messages
-
-id
-
-created_at
-
-message_id
-
-user_id
-```
-
-Alice deletes.
-
-Bob still sees it.
-
-Perfect.
-
----
-
-### 4. conversation_invites
+### 2. conversation_invites
 
 Eventually
 
@@ -478,19 +383,9 @@ Generated asynchronously.
 
 ---
 
-### message_forwards
+### Message forwarding metadata
 
-If you later want
-
-> forwarded many times
-
-```text
-id
-
-original_message_id
-
-forwarded_message_id
-```
+Forwarding provenance uses nullable `messages.forwarded_from_message` (original message ID) and `messages.forwarded_by` (user ID), defined in the consolidated initial migration. No separate forwarding table is retained. Forwarding API behavior is not yet implemented.
 
 ---
 
